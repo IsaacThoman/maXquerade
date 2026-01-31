@@ -16,7 +16,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   scene.fog = new THREE.Fog(0x0b1220, 20, 120)
 
   const camera = new THREE.PerspectiveCamera(
-    80,
+    90, // Wider FOV for speed feel
     Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
     0.1,
     500,
@@ -36,7 +36,12 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   // Player config
   const playerHeight = 1.7
+  const playerRadius = 0.35
+  const slideHeight = 0.9 // Crouched/sliding height
   player.position.set(0, playerHeight, 0)
+
+  // Collision meshes from the map
+  const collisionMeshes: THREE.Mesh[] = []
 
   // Lighting
   const hemi = new THREE.HemisphereLight(0xbad2ff, 0x141118, 0.9)
@@ -60,8 +65,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     const map = gltf.scene
     map.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
-        child.castShadow = true
-        child.receiveShadow = true
+        const mesh = child as THREE.Mesh
+        mesh.castShadow = true
+        mesh.receiveShadow = true
+        // Add all meshes to collision detection
+        collisionMeshes.push(mesh)
       }
     })
     scene.add(map)
@@ -74,27 +82,47 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   let moveRight = false
   let wantJump = false
   let sprinting = false
+  let wantCrouch = false
 
   // Physics state
   const velocity = new THREE.Vector3()
-  const inputDir = new THREE.Vector3()
-  const wishDir = new THREE.Vector3()
   let grounded = true
+  let sliding = false
+  let slideTimer = 0
+  let currentHeight = playerHeight
 
-  // Tuning - feels snappy and responsive
-  const walkSpeed = 8
-  const sprintSpeed = 14
-  const airSpeed = 2.5
-  const groundAccel = 50
-  const airAccel = 20
-  const friction = 10
-  const gravity = 28
-  const jumpVelocity = 9
-  const coyoteTime = 0.12
-  const jumpBufferTime = 0.1
+  // Tuning - FAST AND SNAPPY
+  const walkSpeed = 12
+  const sprintSpeed = 20
+  const slideSpeed = 28 // Initial slide speed
+  const slideMinSpeed = 8 // Minimum speed to maintain slide
+  const slideDuration = 0.8 // Max slide time
+  const slideFriction = 4 // Lower = longer slides
+  const airSpeed = 4
+  const groundAccel = 80 // Snappy acceleration
+  const airAccel = 35 // Good air control
+  const friction = 12
+  const gravity = 32
+  const jumpVelocity = 11
+  const slideJumpBoost = 1.4 // Momentum multiplier when slide-jumping
+  const coyoteTime = 0.15
+  const jumpBufferTime = 0.15
 
   let timeSinceGrounded = 0
   let jumpBuffered = 0
+
+  // Reusable vectors for performance
+  const forward = new THREE.Vector3()
+  const right = new THREE.Vector3()
+  const wishDir = new THREE.Vector3()
+  const rayOrigin = new THREE.Vector3()
+  const rayDir = new THREE.Vector3()
+
+  // Raycasters for collision
+  const groundRaycaster = new THREE.Raycaster()
+  const wallRaycaster = new THREE.Raycaster()
+  groundRaycaster.far = playerHeight + 0.5
+  wallRaycaster.far = playerRadius + 0.1
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.repeat) return
@@ -122,6 +150,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       case 'ShiftLeft':
       case 'ShiftRight':
         sprinting = true
+        break
+      case 'KeyC':
+      case 'ControlLeft':
+      case 'ControlRight':
+        wantCrouch = true
         break
     }
   }
@@ -151,10 +184,15 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       case 'ShiftRight':
         sprinting = false
         break
+      case 'KeyC':
+      case 'ControlLeft':
+      case 'ControlRight':
+        wantCrouch = false
+        break
     }
   }
 
-  // Auto-lock on click (re-locks after Esc too)
+  // Auto-lock on click
   const autoLock = () => {
     controls.lock()
   }
@@ -169,8 +207,76 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
   }
 
-  // Simple ground check (flat floor at y=0 for now; can raycasts if map has geometry)
-  const groundY = 0
+  // Ground raycast check
+  function checkGround(pos: THREE.Vector3): { grounded: boolean; groundY: number } {
+    rayOrigin.set(pos.x, pos.y, pos.z)
+    rayDir.set(0, -1, 0)
+    groundRaycaster.set(rayOrigin, rayDir)
+
+    // Check map collision
+    if (collisionMeshes.length > 0) {
+      const hits = groundRaycaster.intersectObjects(collisionMeshes, false)
+      if (hits.length > 0) {
+        const dist = hits[0].distance
+        if (dist <= currentHeight + 0.1) {
+          return { grounded: true, groundY: pos.y - dist }
+        }
+      }
+    }
+
+    // Fallback to y=0 floor
+    if (pos.y <= currentHeight + 0.1) {
+      return { grounded: true, groundY: 0 }
+    }
+
+    return { grounded: false, groundY: 0 }
+  }
+
+  // Wall collision - push player out of walls
+  function resolveWallCollision(pos: THREE.Vector3, vel: THREE.Vector3): void {
+    if (collisionMeshes.length === 0) return
+
+    // Check 8 directions around player
+    const directions = [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 0, -1),
+      new THREE.Vector3(0.707, 0, 0.707),
+      new THREE.Vector3(-0.707, 0, 0.707),
+      new THREE.Vector3(0.707, 0, -0.707),
+      new THREE.Vector3(-0.707, 0, -0.707),
+    ]
+
+    // Check at multiple heights (feet, waist, head)
+    const heights = [0.2, currentHeight * 0.5, currentHeight - 0.1]
+
+    for (const height of heights) {
+      for (const dir of directions) {
+        rayOrigin.set(pos.x, pos.y - currentHeight + height, pos.z)
+        wallRaycaster.set(rayOrigin, dir)
+        wallRaycaster.far = playerRadius + 0.05
+
+        const hits = wallRaycaster.intersectObjects(collisionMeshes, false)
+        if (hits.length > 0) {
+          const hit = hits[0]
+          const penetration = playerRadius - hit.distance + 0.01
+          if (penetration > 0) {
+            // Push player out
+            pos.x -= dir.x * penetration
+            pos.z -= dir.z * penetration
+
+            // Kill velocity into the wall
+            const velDot = vel.x * dir.x + vel.z * dir.z
+            if (velDot > 0) {
+              vel.x -= dir.x * velDot
+              vel.z -= dir.z * velDot
+            }
+          }
+        }
+      }
+    }
+  }
 
   const clock = new THREE.Clock()
   let raf = 0
@@ -180,14 +286,22 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     const dt = Math.min(0.05, clock.getDelta())
 
     if (controls.isLocked) {
+      // Get camera-relative directions (THE FIX for world-relative controls)
+      camera.getWorldDirection(forward)
+      forward.y = 0
+      forward.normalize()
+      right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize()
+
       // Ground check
-      grounded = player.position.y <= groundY + playerHeight + 0.05
+      const groundCheck = checkGround(player.position)
+      grounded = groundCheck.grounded
 
       if (grounded) {
         timeSinceGrounded = 0
-        if (player.position.y < groundY + playerHeight) {
-          player.position.y = groundY + playerHeight
-          velocity.y = 0
+        const targetY = groundCheck.groundY + currentHeight
+        if (player.position.y < targetY) {
+          player.position.y = targetY
+          if (velocity.y < 0) velocity.y = 0
         }
       } else {
         timeSinceGrounded += dt
@@ -196,32 +310,80 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       // Jump buffer countdown
       if (jumpBuffered > 0) jumpBuffered -= dt
 
+      // Slide logic - CoD style
+      const horizontalSpeed = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
+
+      // Start slide: sprinting + crouch + grounded + fast enough
+      if (wantCrouch && sprinting && grounded && !sliding && horizontalSpeed > walkSpeed) {
+        sliding = true
+        slideTimer = slideDuration
+        // Boost to slide speed in current direction
+        if (horizontalSpeed > 0) {
+          const speedMultiplier = slideSpeed / horizontalSpeed
+          velocity.x *= speedMultiplier
+          velocity.z *= speedMultiplier
+        }
+      }
+
+      // Continue or end slide
+      if (sliding) {
+        slideTimer -= dt
+
+        // End slide conditions
+        if (!wantCrouch || slideTimer <= 0 || horizontalSpeed < slideMinSpeed || !grounded) {
+          sliding = false
+          slideTimer = 0
+        }
+      }
+
+      // Smooth height transition
+      const targetHeight = sliding ? slideHeight : playerHeight
+      currentHeight = THREE.MathUtils.lerp(currentHeight, targetHeight, 1 - Math.pow(0.001, dt))
+
       // Coyote time jump
       const canJump = grounded || timeSinceGrounded < coyoteTime
       if ((wantJump || jumpBuffered > 0) && canJump && velocity.y <= 0.1) {
-        velocity.y = jumpVelocity
+        // Slide jump boost!
+        if (sliding) {
+          velocity.y = jumpVelocity * slideJumpBoost
+          // Maintain horizontal momentum
+          velocity.x *= slideJumpBoost
+          velocity.z *= slideJumpBoost
+        } else {
+          velocity.y = jumpVelocity
+        }
         grounded = false
+        sliding = false
         timeSinceGrounded = coyoteTime // consume coyote
         jumpBuffered = 0
       }
 
-      // Build input direction (local space)
-      inputDir.set(0, 0, 0)
-      if (moveForward) inputDir.z -= 1
-      if (moveBackward) inputDir.z += 1
-      if (moveRight) inputDir.x += 1
-      if (moveLeft) inputDir.x -= 1
-      inputDir.normalize()
+      // Build input direction - CAMERA RELATIVE
+      wishDir.set(0, 0, 0)
+      if (moveForward) wishDir.add(forward)
+      if (moveBackward) wishDir.sub(forward)
+      if (moveRight) wishDir.add(right)
+      if (moveLeft) wishDir.sub(right)
+      wishDir.normalize()
 
-      // Transform to world space (only yaw)
-      const euler = new THREE.Euler(0, camera.rotation.y, 0, 'YXZ')
-      wishDir.copy(inputDir).applyEuler(euler)
+      // Determine max speed and acceleration
+      let maxSpeed: number
+      let accel: number
 
-      const maxSpeed = grounded ? (sprinting ? sprintSpeed : walkSpeed) : airSpeed
-      const accel = grounded ? groundAccel : airAccel
+      if (!grounded) {
+        maxSpeed = airSpeed
+        accel = airAccel
+      } else if (sliding) {
+        // Sliding - reduced control, gradual slowdown
+        maxSpeed = slideSpeed
+        accel = groundAccel * 0.2 // Minimal steering while sliding
+      } else {
+        maxSpeed = sprinting ? sprintSpeed : walkSpeed
+        accel = groundAccel
+      }
 
-      if (grounded) {
-        // Apply friction
+      // Apply friction (not while sliding much)
+      if (grounded && !sliding) {
         const speed = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
         if (speed > 0.1) {
           const drop = speed * friction * dt
@@ -232,10 +394,19 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
           velocity.x = 0
           velocity.z = 0
         }
+      } else if (sliding) {
+        // Light slide friction
+        const speed = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
+        if (speed > 0.1) {
+          const drop = speed * slideFriction * dt
+          const scale = Math.max(speed - drop, 0) / speed
+          velocity.x *= scale
+          velocity.z *= scale
+        }
       }
 
       // Accelerate
-      if (wishDir.lengthSq() > 0) {
+      if (wishDir.lengthSq() > 0 && !sliding) {
         const currentSpeed = velocity.x * wishDir.x + velocity.z * wishDir.z
         const addSpeed = Math.max(0, maxSpeed - currentSpeed)
         const accelAmount = Math.min(accel * dt * maxSpeed, addSpeed)
@@ -253,12 +424,32 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       player.position.z += velocity.z * dt
       player.position.y += velocity.y * dt
 
-      // Clamp to ground
-      if (player.position.y < groundY + playerHeight) {
-        player.position.y = groundY + playerHeight
-        velocity.y = 0
+      // Wall collision resolution
+      resolveWallCollision(player.position, velocity)
+
+      // Final ground clamp
+      const finalGround = checkGround(player.position)
+      if (finalGround.grounded) {
+        const targetY = finalGround.groundY + currentHeight
+        if (player.position.y < targetY) {
+          player.position.y = targetY
+          if (velocity.y < 0) velocity.y = 0
+          grounded = true
+        }
+      }
+
+      // Fallback floor
+      if (player.position.y < currentHeight) {
+        player.position.y = currentHeight
+        if (velocity.y < 0) velocity.y = 0
         grounded = true
       }
+
+      // Dynamic FOV based on speed (subtle and snappy)
+      const speed = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
+      const targetFOV = 90 + Math.min(speed * 0.1, 6) // Up to 96 FOV at high speed
+      camera.fov = THREE.MathUtils.lerp(camera.fov, targetFOV, 1 - Math.pow(0.0001, dt))
+      camera.updateProjectionMatrix()
     }
 
     renderer.render(scene, camera)
