@@ -3,7 +3,6 @@ import { SpriteSheet } from './SpriteSheet'
 
 type BaseOverlayWorldOptions = {
   aspect: number
-  baseImageSrc?: string
   animImageSrc?: string
   alphaMaskSrc?: string
 }
@@ -19,7 +18,6 @@ export class BaseOverlayWorld {
   private texture: THREE.CanvasTexture | null = null
   private canvas: HTMLCanvasElement | null = null
   private ctx: CanvasRenderingContext2D | null = null
-  private baseImage: HTMLImageElement | null = null
   private anim: SpriteSheet | null = null
 
   // Alpha mask for enemy visibility (eye holes)
@@ -62,7 +60,6 @@ export class BaseOverlayWorld {
 
   constructor({
     aspect,
-    baseImageSrc = '/sprites/mask0_wider.png',
     animImageSrc = '/sprites/mask0_wider.png',
     alphaMaskSrc = '/sprites/mask0_wider_alpha.png',
   }: BaseOverlayWorldOptions) {
@@ -97,14 +94,13 @@ export class BaseOverlayWorld {
     this.alphaMaskScene.add(this.alphaMaskPlane)
 
     this.updateCamera()
-    this.loadAssets(baseImageSrc, animImageSrc, alphaMaskSrc)
+    this.loadAssets(animImageSrc, alphaMaskSrc)
   }
 
   update(dt: number, aimAssistActive = false): void {
     const isLookingAtCanvas = aimAssistActive ? this.applyAimAssist(dt) : false
-    if (!this.canvas || !this.ctx || !this.baseImage || !this.anim || !this.texture) return
+    if (!this.canvas || !this.ctx || !this.anim || !this.texture) return
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-    //this.ctx.drawImage(this.baseImage, 0, 0)
     const targetFrame = isLookingAtCanvas ? this.anim.frameCount - 1 : 0
     this.updateAnimFrame(dt, targetFrame)
     this.anim.drawFrame(this.ctx, this.animFrame, this.animX, this.animY, this.animScale)
@@ -239,11 +235,10 @@ export class BaseOverlayWorld {
     return current + delta * t
   }
 
-  private loadAssets(baseImageSrc: string, animImageSrc: string, alphaMaskSrc: string): void {
-    Promise.all([this.loadImage(baseImageSrc), this.loadImage(animImageSrc), this.loadImage(alphaMaskSrc)])
-      .then(([baseImage, animImage, alphaMaskImage]) => {
+  private loadAssets(animImageSrc: string, alphaMaskSrc: string): void {
+    Promise.all([this.loadImage(animImageSrc), this.loadImage(alphaMaskSrc)])
+      .then(([animImage, alphaMaskImage]) => {
         if (this.disposed) return
-        this.baseImage = baseImage
 
         const frameCount = 4
         const framesPerRow = 1
