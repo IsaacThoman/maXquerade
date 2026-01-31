@@ -83,7 +83,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   scene.add(sun)
 
 // Create enemy at specified position with pursuing state (spawn high to let gravity settle)
-  const enemy = new Enemy(new THREE.Vector3(-5.42, 5.0, -5.07), 'idle')
+  const enemy = new Enemy(new THREE.Vector3(-5.42, 5.0, -5.07), 'pursuing')
   enemyScene.add(enemy.mesh)
 
   // Load map.glb
