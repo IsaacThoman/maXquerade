@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { initThreeMeshBVH, setRaycasterFirstHitOnly } from './bvh'
 
 export type EnemyState = 'idle' | 'pursuing'
 
@@ -37,10 +38,26 @@ export class Enemy {
   // Reusable vectors for performance
   private readonly rayOrigin = new THREE.Vector3()
   private readonly rayDir = new THREE.Vector3()
+  private readonly toPlayer = new THREE.Vector3()
+  private readonly cameraPos = new THREE.Vector3()
   private readonly groundRaycaster = new THREE.Raycaster()
   private readonly wallRaycaster = new THREE.Raycaster()
+  private readonly groundHits: THREE.Intersection[] = []
+  private readonly wallHits: THREE.Intersection[] = []
+  private readonly wallDirs = [
+    new THREE.Vector3(1, 0, 0),
+    new THREE.Vector3(-1, 0, 0),
+    new THREE.Vector3(0, 0, 1),
+    new THREE.Vector3(0, 0, -1),
+    new THREE.Vector3(0.707, 0, 0.707),
+    new THREE.Vector3(-0.707, 0, 0.707),
+    new THREE.Vector3(0.707, 0, -0.707),
+    new THREE.Vector3(-0.707, 0, -0.707),
+  ]
 
   constructor(position: THREE.Vector3, state: EnemyState = 'idle') {
+    initThreeMeshBVH()
+
     // Create offscreen canvas at internal resolution
     this.canvas = document.createElement('canvas')
     this.canvas.width = this.width
@@ -71,6 +88,8 @@ export class Enemy {
     // Setup raycasters
     this.groundRaycaster.far = this.enemyHeight + 0.5
     this.wallRaycaster.far = this.enemyRadius + 0.1
+    setRaycasterFirstHitOnly(this.groundRaycaster, true)
+    setRaycasterFirstHitOnly(this.wallRaycaster, true)
 
     // Initial render
     this.renderCheckerboard()
@@ -101,11 +120,12 @@ export class Enemy {
 
     // Check map collision
     if (collisionMeshes.length > 0) {
-      const hits = this.groundRaycaster.intersectObjects(collisionMeshes, false)
-      if (hits.length > 0) {
-        const dist = hits[0].distance
+      this.groundHits.length = 0
+      this.groundRaycaster.intersectObjects(collisionMeshes, false, this.groundHits)
+      if (this.groundHits.length > 0) {
+        const dist = this.groundHits[0].distance
         if (dist <= this.enemyHeight + 0.1) {
-          return { grounded: true, groundY: hits[0].point.y }
+          return { grounded: true, groundY: this.groundHits[0].point.y }
         }
       }
     }
@@ -116,30 +136,22 @@ export class Enemy {
   private resolveWallCollision(pos: THREE.Vector3, vel: THREE.Vector3, collisionMeshes: THREE.Mesh[]): void {
     if (collisionMeshes.length === 0) return
 
-    // Check 8 directions around enemy
-    const directions = [
-      new THREE.Vector3(1, 0, 0),
-      new THREE.Vector3(-1, 0, 0),
-      new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(0, 0, -1),
-      new THREE.Vector3(0.707, 0, 0.707),
-      new THREE.Vector3(-0.707, 0, 0.707),
-      new THREE.Vector3(0.707, 0, -0.707),
-      new THREE.Vector3(-0.707, 0, -0.707),
-    ]
-
     // Check at multiple heights
-    const heights = [0.2, this.enemyHeight * 0.5, this.enemyHeight - 0.1]
+    const height0 = 0.2
+    const height1 = this.enemyHeight * 0.5
+    const height2 = this.enemyHeight - 0.1
 
-    for (const height of heights) {
-      for (const dir of directions) {
+    for (let h = 0; h < 3; h++) {
+      const height = h === 0 ? height0 : h === 1 ? height1 : height2
+      for (const dir of this.wallDirs) {
         this.rayOrigin.set(pos.x, pos.y - this.enemyHeight + height, pos.z)
         this.wallRaycaster.set(this.rayOrigin, dir)
         this.wallRaycaster.far = this.enemyRadius + 0.05
 
-        const hits = this.wallRaycaster.intersectObjects(collisionMeshes, false)
-        if (hits.length > 0) {
-          const hit = hits[0]
+        this.wallHits.length = 0
+        this.wallRaycaster.intersectObjects(collisionMeshes, false, this.wallHits)
+        if (this.wallHits.length > 0) {
+          const hit = this.wallHits[0]
           const penetration = this.enemyRadius - hit.distance + 0.01
           if (penetration > 0) {
             // Push enemy out
@@ -182,25 +194,21 @@ export class Enemy {
     // State-based behavior
     if (this.state === 'pursuing') {
       // Move towards player
-      const toPlayer = new THREE.Vector3(
-        playerPosition.x - pos.x,
-        0,
-        playerPosition.z - pos.z
-      )
-      const distance = toPlayer.length()
+      this.toPlayer.set(playerPosition.x - pos.x, 0, playerPosition.z - pos.z)
+      const distance = this.toPlayer.length()
 
       if (distance > 1.5) {
         // Don't get too close
-        toPlayer.normalize()
+        this.toPlayer.normalize()
 
         // Accelerate towards player
         if (this.grounded) {
-          this.velocity.x = toPlayer.x * this.moveSpeed
-          this.velocity.z = toPlayer.z * this.moveSpeed
+          this.velocity.x = this.toPlayer.x * this.moveSpeed
+          this.velocity.z = this.toPlayer.z * this.moveSpeed
         } else {
           // Less control in air
-          this.velocity.x += toPlayer.x * this.moveSpeed * 0.1 * dt
-          this.velocity.z += toPlayer.z * this.moveSpeed * 0.1 * dt
+          this.velocity.x += this.toPlayer.x * this.moveSpeed * 0.1 * dt
+          this.velocity.z += this.toPlayer.z * this.moveSpeed * 0.1 * dt
         }
       }
     } else {
@@ -251,9 +259,9 @@ export class Enemy {
     }
 
     // Billboard: face the camera but stay perpendicular to ground
-    const cameraPos = camera.position.clone()
-    cameraPos.y = pos.y // Lock to same Y level
-    this.mesh.lookAt(cameraPos)
+    this.cameraPos.copy(camera.position)
+    this.cameraPos.y = pos.y // Lock to same Y level
+    this.mesh.lookAt(this.cameraPos)
 
     // Re-render the animated checkerboard
     this.renderCheckerboard()

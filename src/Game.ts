@@ -4,10 +4,13 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { StatsOverlay } from './StatsOverlay'
 import { Enemy } from './Enemy'
 import { BaseOverlayWorld } from './BaseOverlayWorld'
+import { computeBoundsTreeOnce, disposeBoundsTreeIfPresent, initThreeMeshBVH, setRaycasterFirstHitOnly } from './bvh'
 
 type Cleanup = () => void
 
 export function startWalkingSim(root: HTMLElement): Cleanup {
+  initThreeMeshBVH()
+
   root.innerHTML = ''
   root.classList.add('game-root')
 
@@ -60,6 +63,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   // Collision meshes from the map
   const collisionMeshes: THREE.Mesh[] = []
+  const collisionGeometries = new Set<THREE.BufferGeometry>()
 
   // Lighting
   const hemi = new THREE.HemisphereLight(0xbad2ff, 0x141118, 0.9)
@@ -92,6 +96,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         mesh.receiveShadow = true
         // Add all meshes to collision detection
         collisionMeshes.push(mesh)
+
+        const geometry = mesh.geometry as THREE.BufferGeometry
+        collisionGeometries.add(geometry)
+        computeBoundsTreeOnce(geometry)
       }
     })
     scene.add(map)
@@ -141,12 +149,28 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const rayOrigin = new THREE.Vector3()
   const rayDir = new THREE.Vector3()
   const frozenCameraQuat = new THREE.Quaternion()
+  const up = new THREE.Vector3(0, 1, 0)
 
   // Raycasters for collision
   const groundRaycaster = new THREE.Raycaster()
   const wallRaycaster = new THREE.Raycaster()
   groundRaycaster.far = playerHeight + 0.5
   wallRaycaster.far = playerRadius + 0.1
+  setRaycasterFirstHitOnly(groundRaycaster, true)
+  setRaycasterFirstHitOnly(wallRaycaster, true)
+
+  const groundHits: THREE.Intersection[] = []
+  const wallHits: THREE.Intersection[] = []
+  const wallDirs = [
+    new THREE.Vector3(1, 0, 0),
+    new THREE.Vector3(-1, 0, 0),
+    new THREE.Vector3(0, 0, 1),
+    new THREE.Vector3(0, 0, -1),
+    new THREE.Vector3(0.707, 0, 0.707),
+    new THREE.Vector3(-0.707, 0, 0.707),
+    new THREE.Vector3(0.707, 0, -0.707),
+    new THREE.Vector3(-0.707, 0, -0.707),
+  ]
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.repeat) return
@@ -259,9 +283,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
     // Check map collision
     if (collisionMeshes.length > 0) {
-      const hits = groundRaycaster.intersectObjects(collisionMeshes, false)
-      if (hits.length > 0) {
-        const dist = hits[0].distance
+      groundHits.length = 0
+      groundRaycaster.intersectObjects(collisionMeshes, false, groundHits)
+      if (groundHits.length > 0) {
+        const dist = groundHits[0].distance
         if (dist <= currentHeight + 0.1) {
           return { grounded: true, groundY: pos.y - dist }
         }
@@ -280,30 +305,22 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   function resolveWallCollision(pos: THREE.Vector3, vel: THREE.Vector3): void {
     if (collisionMeshes.length === 0) return
 
-    // Check 8 directions around player
-    const directions = [
-      new THREE.Vector3(1, 0, 0),
-      new THREE.Vector3(-1, 0, 0),
-      new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(0, 0, -1),
-      new THREE.Vector3(0.707, 0, 0.707),
-      new THREE.Vector3(-0.707, 0, 0.707),
-      new THREE.Vector3(0.707, 0, -0.707),
-      new THREE.Vector3(-0.707, 0, -0.707),
-    ]
-
     // Check at multiple heights (feet, waist, head)
-    const heights = [0.2, currentHeight * 0.5, currentHeight - 0.1]
+    const height0 = 0.2
+    const height1 = currentHeight * 0.5
+    const height2 = currentHeight - 0.1
 
-    for (const height of heights) {
-      for (const dir of directions) {
+    for (let h = 0; h < 3; h++) {
+      const height = h === 0 ? height0 : h === 1 ? height1 : height2
+      for (const dir of wallDirs) {
         rayOrigin.set(pos.x, pos.y - currentHeight + height, pos.z)
         wallRaycaster.set(rayOrigin, dir)
         wallRaycaster.far = playerRadius + 0.05
 
-        const hits = wallRaycaster.intersectObjects(collisionMeshes, false)
-        if (hits.length > 0) {
-          const hit = hits[0]
+        wallHits.length = 0
+        wallRaycaster.intersectObjects(collisionMeshes, false, wallHits)
+        if (wallHits.length > 0) {
+          const hit = wallHits[0]
           const penetration = playerRadius - hit.distance + 0.01
           if (penetration > 0) {
             // Push player out
@@ -353,7 +370,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       camera.getWorldDirection(forward)
       forward.y = 0
       forward.normalize()
-      right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize()
+      right.crossVectors(forward, up).normalize()
 
       // Ground check
       const groundCheck = checkGround(player.position)
@@ -586,6 +603,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     document.removeEventListener('mouseup', onMouseUp)
     document.removeEventListener('contextmenu', onContextMenu)
     document.removeEventListener('click', autoLock)
+
+    for (const geometry of collisionGeometries) {
+      disposeBoundsTreeIfPresent(geometry)
+    }
 
     enemy.dispose()
     baseOverlayWorld.dispose()
