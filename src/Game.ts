@@ -20,6 +20,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   scene.background = new THREE.Color(0x0b1220)
   scene.fog = new THREE.Fog(0x0b1220, 20, 120)
 
+  const overlayScene = new THREE.Scene()
+
   const camera = new THREE.PerspectiveCamera(
     90, // Wider FOV for speed feel
     Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
@@ -27,17 +29,54 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     500,
   )
 
+  const overlayCamera = new THREE.PerspectiveCamera(
+    45,
+    Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
+    0.1,
+    50,
+  )
+  overlayCamera.position.set(0, 0, 2.4)
+
   const renderer = new THREE.WebGLRenderer({ antialias: true })
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  renderer.autoClear = false
   renderer.domElement.className = 'game-canvas'
   root.append(renderer.domElement, crosshair)
 
   const controls = new PointerLockControls(camera, renderer.domElement)
   const player = controls.object
   scene.add(player)
+
+  const overlayPlaneGeometry = new THREE.PlaneGeometry(1, 1)
+  const overlayPlaneMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthTest: false,
+    depthWrite: false,
+  })
+  const overlayPlane = new THREE.Mesh(overlayPlaneGeometry, overlayPlaneMaterial)
+  overlayScene.add(overlayPlane)
+
+  const overlayTextureLoader = new THREE.TextureLoader()
+  let overlayTexture: THREE.Texture | null = null
+  overlayTextureLoader.load('/sprites/mask0.png', (texture) => {
+    overlayTexture = texture
+    texture.magFilter = THREE.NearestFilter
+    texture.minFilter = THREE.NearestFilter
+    texture.generateMipmaps = false
+
+    overlayPlaneMaterial.map = texture
+    overlayPlaneMaterial.needsUpdate = true
+
+    const image = texture.image as HTMLImageElement | undefined
+    if (image && image.width && image.height) {
+      const aspect = image.width / image.height
+      overlayPlane.scale.set(aspect, 1, 1)
+    }
+  })
 
   // Player config
   const playerHeight = 1.7
@@ -92,6 +131,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   let wantJump = false
   let sprinting = false
   let wantCrouch = false
+  let rightMouseDown = false
 
   // Physics state
   const velocity = new THREE.Vector3()
@@ -126,6 +166,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const wishDir = new THREE.Vector3()
   const rayOrigin = new THREE.Vector3()
   const rayDir = new THREE.Vector3()
+  const frozenCameraQuat = new THREE.Quaternion()
+  const overlayEuler = new THREE.Euler(0, 0, 0, 'YXZ')
+  let overlayYaw = 0
+  let overlayPitch = 0
 
   // Raycasters for collision
   const groundRaycaster = new THREE.Raycaster()
@@ -201,6 +245,42 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     }
   }
 
+  const updateOverlayCamera = () => {
+    overlayEuler.set(overlayPitch, overlayYaw, 0)
+    overlayCamera.quaternion.setFromEuler(overlayEuler)
+  }
+
+  updateOverlayCamera()
+
+  const onMouseMove = (event: MouseEvent) => {
+    if (!rightMouseDown) return
+    const movementX = event.movementX || 0
+    const movementY = event.movementY || 0
+    const sensitivity = 0.0025
+
+    overlayYaw -= movementX * sensitivity
+    overlayPitch -= movementY * sensitivity
+
+    const maxPitch = Math.PI * 0.49
+    overlayPitch = Math.max(-maxPitch, Math.min(maxPitch, overlayPitch))
+    updateOverlayCamera()
+  }
+
+  const onMouseDown = (event: MouseEvent) => {
+    if (event.button !== 2) return
+    rightMouseDown = true
+    frozenCameraQuat.copy(camera.quaternion)
+  }
+
+  const onMouseUp = (event: MouseEvent) => {
+    if (event.button !== 2) return
+    rightMouseDown = false
+  }
+
+  const onContextMenu = (event: MouseEvent) => {
+    event.preventDefault()
+  }
+
   // Auto-lock on click
   const autoLock = () => {
     controls.lock()
@@ -212,6 +292,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     const h = Math.max(1, window.innerHeight)
     camera.aspect = w / h
     camera.updateProjectionMatrix()
+    overlayCamera.aspect = w / h
+    overlayCamera.updateProjectionMatrix()
     renderer.setSize(w, h)
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
   }
@@ -293,6 +375,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const animate = () => {
     raf = window.requestAnimationFrame(animate)
     const dt = Math.min(0.05, clock.getDelta())
+
+    if (rightMouseDown) {
+      camera.quaternion.copy(frozenCameraQuat)
+      camera.updateMatrixWorld()
+    }
 
     if (controls.isLocked) {
       // Get camera-relative directions (THE FIX for world-relative controls)
@@ -477,12 +564,19 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       collisionMeshes,
     })
 
+    renderer.clear()
     renderer.render(scene, camera)
+    renderer.clearDepth()
+    renderer.render(overlayScene, overlayCamera)
   }
   animate()
 
   document.addEventListener('keydown', onKeyDown)
   document.addEventListener('keyup', onKeyUp)
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mousedown', onMouseDown)
+  document.addEventListener('mouseup', onMouseUp)
+  document.addEventListener('contextmenu', onContextMenu)
   window.addEventListener('resize', onResize)
 
   return () => {
@@ -490,9 +584,16 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     window.removeEventListener('resize', onResize)
     document.removeEventListener('keydown', onKeyDown)
     document.removeEventListener('keyup', onKeyUp)
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mousedown', onMouseDown)
+    document.removeEventListener('mouseup', onMouseUp)
+    document.removeEventListener('contextmenu', onContextMenu)
     document.removeEventListener('click', autoLock)
 
     enemy.dispose()
+    overlayTexture?.dispose()
+    overlayPlaneMaterial.dispose()
+    overlayPlaneGeometry.dispose()
     statsOverlay.destroy()
     renderer.dispose()
     root.innerHTML = ''
