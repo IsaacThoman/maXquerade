@@ -45,7 +45,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   renderer.autoClear = false
   renderer.domElement.className = 'game-canvas'
-  root.append(renderer.domElement, crosshair)
+ // root.append(renderer.domElement, crosshair)
 
   const controls = new PointerLockControls(camera, renderer.domElement)
   const player = controls.object
