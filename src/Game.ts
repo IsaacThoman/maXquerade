@@ -510,7 +510,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       collisionMeshes,
     })
 
-    baseOverlayWorld.update(dt)
+    baseOverlayWorld.update(dt, !rightMouseDown)
 
     renderer.clear()
     renderer.render(scene, camera)

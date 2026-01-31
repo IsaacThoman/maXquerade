@@ -26,17 +26,32 @@ export class BaseOverlayWorld {
   private animScale = 1
   private animFrame = 0
   private animTimer = 0
-  private readonly animFps = 8
+  private readonly animFps = 14
 
   private euler = new THREE.Euler(0, 0, 0, 'YXZ')
   private yaw = 0
   private pitch = 0
+  private readonly maxPitch = Math.PI * 0.49
   private disposed = false
+
+  private readonly aimAssistTargets: THREE.Object3D[] = []
+  private readonly aimAssistCameraPos = new THREE.Vector3()
+  private readonly aimAssistTargetPos = new THREE.Vector3()
+  private readonly aimAssistForward = new THREE.Vector3()
+  private readonly aimAssistDir = new THREE.Vector3()
+  private readonly aimAssistBestDir = new THREE.Vector3()
+  private readonly aimAssistQuat = new THREE.Quaternion()
+  private readonly aimAssistEuler = new THREE.Euler(0, 0, 0, 'YXZ')
+  private readonly aimAssistBaseForward = new THREE.Vector3(0, 0, -1)
+  private readonly aimAssistRaycaster = new THREE.Raycaster()
+  private readonly aimAssistRayHits: THREE.Intersection[] = []
+  private readonly aimAssistDamping = 6
+  private readonly aimAssistMaxAngle = Math.PI
 
   constructor({ aspect, baseImageSrc = '/sprites/mask0.png', animImageSrc = '/sprites/mask1.png' }: BaseOverlayWorldOptions) {
     this.scene = new THREE.Scene()
-    this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 50)
-    this.camera.position.set(0, 0, 2.4)
+    this.camera = new THREE.PerspectiveCamera(90, aspect, 0.1, 50)
+    this.camera.position.set(0, 0, 0.4)
 
     this.planeGeometry = new THREE.PlaneGeometry(1, 1)
     this.planeMaterial = new THREE.MeshBasicMaterial({
@@ -52,18 +67,13 @@ export class BaseOverlayWorld {
     this.loadAssets(baseImageSrc, animImageSrc)
   }
 
-  update(dt: number): void {
+  update(dt: number, aimAssistActive = false): void {
+    const isLookingAtCanvas = aimAssistActive ? this.applyAimAssist(dt) : false
     if (!this.canvas || !this.ctx || !this.baseImage || !this.anim || !this.texture) return
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-    this.ctx.drawImage(this.baseImage, 0, 0)
-    if (this.anim.frameCount > 1 && this.animFps > 0) {
-      const frameDuration = 1 / this.animFps
-      this.animTimer += dt
-      while (this.animTimer >= frameDuration) {
-        this.animTimer -= frameDuration
-        this.animFrame = (this.animFrame + 1) % this.anim.frameCount
-      }
-    }
+    //this.ctx.drawImage(this.baseImage, 0, 0)
+    const targetFrame = isLookingAtCanvas ? this.anim.frameCount - 1 : 0
+    this.updateAnimFrame(dt, targetFrame)
     this.anim.drawFrame(this.ctx, this.animFrame, this.animX, this.animY, this.animScale)
     this.texture.needsUpdate = true
   }
@@ -77,8 +87,7 @@ export class BaseOverlayWorld {
     this.yaw -= movementX * sensitivity
     this.pitch -= movementY * sensitivity
 
-    const maxPitch = Math.PI * 0.49
-    this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch))
+    this.pitch = Math.max(-this.maxPitch, Math.min(this.maxPitch, this.pitch))
     this.updateCamera()
   }
 
@@ -99,6 +108,88 @@ export class BaseOverlayWorld {
   private updateCamera(): void {
     this.euler.set(this.pitch, this.yaw, 0)
     this.camera.quaternion.setFromEuler(this.euler)
+  }
+
+  private applyAimAssist(dt: number): boolean {
+    this.collectCanvasTargets()
+    if (this.aimAssistTargets.length === 0) return false
+
+    this.camera.getWorldPosition(this.aimAssistCameraPos)
+    this.camera.getWorldDirection(this.aimAssistForward)
+
+    this.aimAssistRaycaster.set(this.aimAssistCameraPos, this.aimAssistForward)
+    this.aimAssistRayHits.length = 0
+    const hits = this.aimAssistRaycaster.intersectObjects(this.aimAssistTargets, false, this.aimAssistRayHits)
+    if (hits.length === 0) return false
+
+    const hitObject = hits[0].object
+    if (!hitObject.visible) return false
+
+    hitObject.getWorldPosition(this.aimAssistTargetPos)
+    this.aimAssistDir.subVectors(this.aimAssistTargetPos, this.aimAssistCameraPos)
+    if (this.aimAssistDir.lengthSq() <= 0) return false
+    this.aimAssistDir.normalize()
+
+    const dot = this.aimAssistForward.dot(this.aimAssistDir)
+    const angle = Math.acos(THREE.MathUtils.clamp(dot, -1, 1))
+    if (angle > this.aimAssistMaxAngle) return false
+
+    this.aimAssistBestDir.copy(this.aimAssistDir)
+
+    this.aimAssistQuat.setFromUnitVectors(this.aimAssistBaseForward, this.aimAssistBestDir)
+    this.aimAssistEuler.setFromQuaternion(this.aimAssistQuat, 'YXZ')
+
+    const targetPitch = this.aimAssistEuler.x
+    const targetYaw = this.aimAssistEuler.y
+    const t = 1 - Math.exp(-this.aimAssistDamping * dt)
+
+    this.pitch = Math.max(-this.maxPitch, Math.min(this.maxPitch, this.lerpAngle(this.pitch, targetPitch, t)))
+    this.yaw = this.lerpAngle(this.yaw, targetYaw, t)
+    this.updateCamera()
+    return true
+  }
+
+  private updateAnimFrame(dt: number, targetFrame: number): void {
+    if (this.animFps <= 0 || this.animFrame === targetFrame) return
+    const frameDuration = 1 / this.animFps
+    this.animTimer += dt
+    while (this.animTimer >= frameDuration) {
+      this.animTimer -= frameDuration
+      if (this.animFrame < targetFrame) {
+        this.animFrame += 1
+      } else if (this.animFrame > targetFrame) {
+        this.animFrame -= 1
+      } else {
+        break
+      }
+    }
+  }
+
+  private collectCanvasTargets(): void {
+    this.aimAssistTargets.length = 0
+    this.scene.traverse((child) => {
+      if (!(child as THREE.Mesh).isMesh) return
+      const mesh = child as THREE.Mesh
+      if (!this.meshHasCanvasTexture(mesh)) return
+      this.aimAssistTargets.push(mesh)
+    })
+  }
+
+  private meshHasCanvasTexture(mesh: THREE.Mesh): boolean {
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const material of materials) {
+      if (!material) continue
+      const mat = material as THREE.MeshBasicMaterial
+      if ('map' in mat && mat.map instanceof THREE.CanvasTexture) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private lerpAngle(current: number, target: number, t: number): number {
+    const delta = THREE.MathUtils.euclideanModulo(target - current + Math.PI, Math.PI * 2) - Math.PI
+    return current + delta * t
   }
 
   private loadAssets(baseImageSrc: string, animImageSrc: string): void {
