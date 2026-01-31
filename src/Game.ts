@@ -64,8 +64,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   sun.shadow.camera.bottom = -80
   scene.add(sun)
 
-  // Create enemy at specified position with pursuing state
-  const enemy = new Enemy(new THREE.Vector3(-5.42, 1.70, -5.07), 'pursuing')
+// Create enemy at specified position with pursuing state (spawn high to let gravity settle)
+  const enemy = new Enemy(new THREE.Vector3(-5.42, 5.0, -5.07), 'idle')
   scene.add(enemy.mesh)
 
   // Load map.glb
@@ -467,15 +467,15 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         grounded: grounded,
         sliding: sliding,
       })
-
-      // Update enemy
-      enemy.update({
-        dt,
-        camera,
-        playerPosition: player.position,
-        collisionMeshes,
-      })
     }
+
+    // Always update enemy physics
+    enemy.update({
+      dt,
+      camera,
+      playerPosition: player.position,
+      collisionMeshes,
+    })
 
     renderer.render(scene, camera)
   }

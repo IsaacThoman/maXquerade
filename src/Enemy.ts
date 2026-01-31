@@ -105,14 +105,9 @@ export class Enemy {
       if (hits.length > 0) {
         const dist = hits[0].distance
         if (dist <= this.enemyHeight + 0.1) {
-          return { grounded: true, groundY: pos.y - dist }
+          return { grounded: true, groundY: hits[0].point.y }
         }
       }
-    }
-
-    // Fallback to y=0 floor
-    if (pos.y <= this.enemyHeight + 0.1) {
-      return { grounded: true, groundY: 0 }
     }
 
     return { grounded: false, groundY: 0 }
@@ -248,8 +243,8 @@ export class Enemy {
       }
     }
 
-    // Fallback floor
-    if (pos.y < this.enemyHeight) {
+    // Fallback floor (only if no collision meshes loaded yet)
+    if (collisionMeshes.length === 0 && pos.y < this.enemyHeight) {
       pos.y = this.enemyHeight
       if (this.velocity.y < 0) this.velocity.y = 0
       this.grounded = true
