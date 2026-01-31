@@ -86,6 +86,12 @@ body {
   color: rgba(255, 255, 255, 0.9);
 }
 
+.stats-row--timing {
+  /* Backdrop blur is expensive; keep timing rows cheap. */
+  backdrop-filter: none;
+  background: rgba(0, 0, 0, 0.35);
+}
+
 .stats-label {
   color: rgba(255, 255, 255, 0.5);
   margin-right: 6px;
