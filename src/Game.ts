@@ -21,6 +21,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   scene.background = new THREE.Color(0x0b1220)
   scene.fog = new THREE.Fog(0x0b1220, 20, 120)
 
+  // Separate scene for enemies (rendered through mask eye holes only)
+  const enemyScene = new THREE.Scene()
+  enemyScene.fog = new THREE.Fog(0x0b1220, 20, 120)
+
   const camera = new THREE.PerspectiveCamera(
     90, // Wider FOV for speed feel
     Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
@@ -32,7 +36,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     aspect: Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
   })
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true })
+  const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true })
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.shadowMap.enabled = true
@@ -40,6 +44,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   renderer.autoClear = false
   renderer.domElement.className = 'game-canvas'
   root.append(renderer.domElement, crosshair)
+
+  // Get WebGL context for stencil operations
+  const gl = renderer.getContext()
 
   const controls = new PointerLockControls(camera, renderer.domElement)
   const player = controls.object
@@ -72,7 +79,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
 // Create enemy at specified position with pursuing state (spawn high to let gravity settle)
   const enemy = new Enemy(new THREE.Vector3(-5.42, 5.0, -5.07), 'idle')
-  scene.add(enemy.mesh)
+  enemyScene.add(enemy.mesh)
 
   // Load map.glb
   const loader = new GLTFLoader()
@@ -512,8 +519,35 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
     baseOverlayWorld.update(dt, !rightMouseDown)
 
-    renderer.clear()
+    // === MULTI-PASS RENDERING WITH STENCIL MASKING ===
+    // Enemies are only visible through the mask's eye holes
+    
+    // Pass 1: Clear everything and render the world (map, environment)
+    renderer.clear(true, true, true) // color, depth, stencil
     renderer.render(scene, camera)
+    
+    // Pass 2: Render alpha mask to STENCIL BUFFER ONLY (eye holes)
+    // Configure stencil: write 1 where alpha mask is drawn
+    gl.enable(gl.STENCIL_TEST)
+    gl.stencilFunc(gl.ALWAYS, 1, 0xff)
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE)
+    gl.colorMask(false, false, false, false) // Don't write to color buffer
+    gl.depthMask(false) // Don't write to depth buffer
+    
+    renderer.render(baseOverlayWorld.alphaMaskScene, baseOverlayWorld.alphaMaskCamera)
+    
+    // Pass 3: Render enemies ONLY where stencil == 1 (eye holes)
+    gl.stencilFunc(gl.EQUAL, 1, 0xff)
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP)
+    gl.colorMask(true, true, true, true) // Write to color buffer
+    gl.depthMask(true) // Write to depth buffer
+    
+    renderer.render(enemyScene, camera)
+    
+    // Disable stencil for the rest
+    gl.disable(gl.STENCIL_TEST)
+    
+    // Pass 4: Render the mask overlay on top
     renderer.clearDepth()
     renderer.render(baseOverlayWorld.scene, baseOverlayWorld.camera)
   }

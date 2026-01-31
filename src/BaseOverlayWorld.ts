@@ -5,6 +5,7 @@ type BaseOverlayWorldOptions = {
   aspect: number
   baseImageSrc?: string
   animImageSrc?: string
+  alphaMaskSrc?: string
 }
 
 export class BaseOverlayWorld {
@@ -20,6 +21,17 @@ export class BaseOverlayWorld {
   private ctx: CanvasRenderingContext2D | null = null
   private baseImage: HTMLImageElement | null = null
   private anim: SpriteSheet | null = null
+
+  // Alpha mask for enemy visibility (eye holes)
+  readonly alphaMaskScene: THREE.Scene
+  readonly alphaMaskCamera: THREE.PerspectiveCamera
+  private alphaMaskPlane: THREE.Mesh
+  private alphaMaskGeometry: THREE.PlaneGeometry
+  private alphaMaskMaterial: THREE.MeshBasicMaterial
+  private alphaMaskTexture: THREE.CanvasTexture | null = null
+  private alphaMaskCanvas: HTMLCanvasElement | null = null
+  private alphaMaskCtx: CanvasRenderingContext2D | null = null
+  private alphaMaskAnim: SpriteSheet | null = null
 
   private animX = 0
   private animY = 0
@@ -48,7 +60,7 @@ export class BaseOverlayWorld {
   private readonly aimAssistDamping = 6
   private readonly aimAssistMaxAngle = Math.PI
 
-  constructor({ aspect, baseImageSrc = '/sprites/mask0.png', animImageSrc = '/sprites/mask1.png' }: BaseOverlayWorldOptions) {
+  constructor({ aspect, baseImageSrc = '/sprites/mask0.png', animImageSrc = '/sprites/mask1.png', alphaMaskSrc = '/sprites/mask0_alpha.png' }: BaseOverlayWorldOptions) {
     this.scene = new THREE.Scene()
     this.camera = new THREE.PerspectiveCamera(90, aspect, 0.1, 50)
     this.camera.position.set(0, 0, 0.4)
@@ -63,8 +75,24 @@ export class BaseOverlayWorld {
     this.plane = new THREE.Mesh(this.planeGeometry, this.planeMaterial)
     this.scene.add(this.plane)
 
+    // Alpha mask scene (for stencil-based enemy visibility through eye holes)
+    this.alphaMaskScene = new THREE.Scene()
+    this.alphaMaskCamera = new THREE.PerspectiveCamera(90, aspect, 0.1, 50)
+    this.alphaMaskCamera.position.set(0, 0, 0.4)
+    
+    this.alphaMaskGeometry = new THREE.PlaneGeometry(1, 1)
+    this.alphaMaskMaterial = new THREE.MeshBasicMaterial({
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthTest: false,
+      depthWrite: false,
+      alphaTest: 0.5, // Only draw (and write to stencil) where alpha > 0.5
+    })
+    this.alphaMaskPlane = new THREE.Mesh(this.alphaMaskGeometry, this.alphaMaskMaterial)
+    this.alphaMaskScene.add(this.alphaMaskPlane)
+
     this.updateCamera()
-    this.loadAssets(baseImageSrc, animImageSrc)
+    this.loadAssets(baseImageSrc, animImageSrc, alphaMaskSrc)
   }
 
   update(dt: number, aimAssistActive = false): void {
@@ -76,6 +104,13 @@ export class BaseOverlayWorld {
     this.updateAnimFrame(dt, targetFrame)
     this.anim.drawFrame(this.ctx, this.animFrame, this.animX, this.animY, this.animScale)
     this.texture.needsUpdate = true
+
+    // Update alpha mask in sync with main mask
+    if (this.alphaMaskCanvas && this.alphaMaskCtx && this.alphaMaskAnim && this.alphaMaskTexture) {
+      this.alphaMaskCtx.clearRect(0, 0, this.alphaMaskCanvas.width, this.alphaMaskCanvas.height)
+      this.alphaMaskAnim.drawFrame(this.alphaMaskCtx, this.animFrame, this.animX, this.animY, this.animScale)
+      this.alphaMaskTexture.needsUpdate = true
+    }
   }
 
   handleMouseMove(event: MouseEvent, allowRotation: boolean): void {
@@ -96,6 +131,8 @@ export class BaseOverlayWorld {
     const h = Math.max(1, height)
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
+    this.alphaMaskCamera.aspect = w / h
+    this.alphaMaskCamera.updateProjectionMatrix()
   }
 
   dispose(): void {
@@ -103,11 +140,16 @@ export class BaseOverlayWorld {
     this.texture?.dispose()
     this.planeMaterial.dispose()
     this.planeGeometry.dispose()
+    this.alphaMaskTexture?.dispose()
+    this.alphaMaskMaterial.dispose()
+    this.alphaMaskGeometry.dispose()
   }
 
   private updateCamera(): void {
     this.euler.set(this.pitch, this.yaw, 0)
     this.camera.quaternion.setFromEuler(this.euler)
+    // Keep alpha mask camera in sync
+    this.alphaMaskCamera.quaternion.setFromEuler(this.euler)
   }
 
   private applyAimAssist(dt: number): boolean {
@@ -192,9 +234,9 @@ export class BaseOverlayWorld {
     return current + delta * t
   }
 
-  private loadAssets(baseImageSrc: string, animImageSrc: string): void {
-    Promise.all([this.loadImage(baseImageSrc), this.loadImage(animImageSrc)])
-      .then(([baseImage, animImage]) => {
+  private loadAssets(baseImageSrc: string, animImageSrc: string, alphaMaskSrc: string): void {
+    Promise.all([this.loadImage(baseImageSrc), this.loadImage(animImageSrc), this.loadImage(alphaMaskSrc)])
+      .then(([baseImage, animImage, alphaMaskImage]) => {
         if (this.disposed) return
         this.baseImage = baseImage
         this.canvas = document.createElement('canvas')
@@ -222,6 +264,28 @@ export class BaseOverlayWorld {
 
         this.animX = Math.floor((this.canvas.width - this.anim.frameWidth * this.animScale) / 2)
         this.animY = Math.floor((this.canvas.height - this.anim.frameHeight * this.animScale) / 2)
+
+        // Setup alpha mask canvas and texture (same dimensions as main)
+        this.alphaMaskCanvas = document.createElement('canvas')
+        this.alphaMaskCanvas.width = baseImage.width
+        this.alphaMaskCanvas.height = baseImage.height
+        this.alphaMaskCtx = this.alphaMaskCanvas.getContext('2d')
+        if (!this.alphaMaskCtx) return
+        this.alphaMaskCtx.imageSmoothingEnabled = false
+
+        this.alphaMaskTexture = new THREE.CanvasTexture(this.alphaMaskCanvas)
+        this.alphaMaskTexture.magFilter = THREE.NearestFilter
+        this.alphaMaskTexture.minFilter = THREE.NearestFilter
+        this.alphaMaskTexture.generateMipmaps = false
+
+        this.alphaMaskMaterial.map = this.alphaMaskTexture
+        this.alphaMaskMaterial.needsUpdate = true
+        this.alphaMaskPlane.scale.set(aspect, 1, 1)
+
+        this.alphaMaskAnim = new SpriteSheet(alphaMaskImage, 64, 48, {
+          frameCount: 4,
+          framesPerRow: 1,
+        })
 
         this.update(0)
       })
