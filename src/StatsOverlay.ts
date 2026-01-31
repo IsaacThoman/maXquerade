@@ -12,6 +12,8 @@ const TIMING_DISPLAY_ORDER: readonly FrameTimingKey[] = [
   'render.world',
   'render.mask',
   'render.enemies',
+  'render.enemies.unmasked',
+  'render.enemies.masked',
   'render.overlay',
 ]
 

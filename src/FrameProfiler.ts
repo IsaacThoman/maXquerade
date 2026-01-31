@@ -9,6 +9,8 @@ export const FRAME_TIMING_KEYS = [
   'render.world',
   'render.mask',
   'render.enemies',
+  'render.enemies.unmasked',
+  'render.enemies.masked',
   'render.overlay',
 ] as const
 

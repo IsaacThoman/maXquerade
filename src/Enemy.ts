@@ -3,6 +3,8 @@ import { initThreeMeshBVH, setRaycasterFirstHitOnly } from './bvh'
 
 export type EnemyState = 'idle' | 'pursuing'
 
+export type EnemyType = 0 | 1
+
 export interface EnemyUpdateParams {
   dt: number
   camera: THREE.Camera
@@ -12,6 +14,7 @@ export interface EnemyUpdateParams {
 
 export class Enemy {
   readonly mesh: THREE.Mesh
+  readonly type: EnemyType
   private canvas: HTMLCanvasElement
   private ctx: CanvasRenderingContext2D
   private texture: THREE.CanvasTexture
@@ -26,7 +29,7 @@ export class Enemy {
   private readonly width = 16
   private readonly height = 32
 
-  // Sprite sheet (enemy0.png)
+  // Sprite sheet (enemy0.png / enemy1.png)
   private readonly frameW = 16
   private readonly frameH = 32
   private readonly sheetCols = 4
@@ -67,8 +70,10 @@ export class Enemy {
     new THREE.Vector3(-0.707, 0, -0.707),
   ]
 
-  constructor(position: THREE.Vector3, state: EnemyState = 'idle') {
+  constructor(position: THREE.Vector3, state: EnemyState = 'idle', type: EnemyType = 0) {
     initThreeMeshBVH()
+
+    this.type = type
 
     // Create offscreen canvas at internal resolution
     this.canvas = document.createElement('canvas')
@@ -90,6 +95,7 @@ export class Enemy {
     const material = new THREE.MeshBasicMaterial({
       map: this.texture,
       transparent: true,
+      alphaTest: 0.5, // Prevent fully transparent pixels from writing depth
       side: THREE.DoubleSide,
     })
 
@@ -110,7 +116,7 @@ export class Enemy {
       this.spriteReady = true
       this.renderSpriteFrame(0)
     }
-    this.spriteSheet.src = '/sprites/enemy0.png'
+    this.spriteSheet.src = this.type === 1 ? '/sprites/enemy1.png' : '/sprites/enemy0.png'
 
     // Initial render
     this.renderCheckerboard()
