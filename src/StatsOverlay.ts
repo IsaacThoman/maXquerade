@@ -5,6 +5,7 @@ export interface StatsData {
   velocity?: THREE.Vector3
   grounded?: boolean
   sliding?: boolean
+  fps?: number
 }
 
 /**
@@ -16,8 +17,9 @@ export class StatsOverlay {
   private coordsElement: HTMLElement
   private velocityElement: HTMLElement | null = null
   private stateElement: HTMLElement | null = null
+  private fpsElement: HTMLElement | null = null
 
-  constructor(parent: HTMLElement, options: { showVelocity?: boolean; showState?: boolean } = {}) {
+  constructor(parent: HTMLElement, options: { showVelocity?: boolean; showState?: boolean; showFPS?: boolean } = {}) {
     this.container = document.createElement('div')
     this.container.className = 'stats-overlay'
 
@@ -38,6 +40,13 @@ export class StatsOverlay {
       this.stateElement = document.createElement('div')
       this.stateElement.className = 'stats-row'
       this.container.appendChild(this.stateElement)
+    }
+
+    // Optional FPS display
+    if (options.showFPS) {
+      this.fpsElement = document.createElement('div')
+      this.fpsElement.className = 'stats-row'
+      this.container.appendChild(this.fpsElement)
     }
 
     parent.appendChild(this.container)
@@ -72,6 +81,11 @@ export class StatsOverlay {
       if (sliding) states.push('sliding')
       if (states.length === 0) states.push('airborne')
       this.stateElement.innerHTML = `<span class="stats-label">state</span> <span class="stats-state">${states.join(' | ')}</span>`
+    }
+
+    // Update FPS if enabled
+    if (this.fpsElement && data.fps !== undefined) {
+      this.fpsElement.innerHTML = `<span class="stats-label">fps</span> <span class="stats-value">${data.fps.toFixed(1)}</span>`
     }
   }
 

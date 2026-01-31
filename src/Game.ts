@@ -15,7 +15,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   crosshair.className = 'crosshair'
 
   // Stats overlay
-  const statsOverlay = new StatsOverlay(root, { showVelocity: true, showState: true })
+  const statsOverlay = new StatsOverlay(root, { showVelocity: true, showState: true, showFPS: true })
 
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x0b1220)
@@ -325,9 +325,23 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const clock = new THREE.Clock()
   let raf = 0
 
+  // FPS tracking
+  let frameCount = 0
+  let fpsUpdateTime = 0
+  let currentFPS = 0
+
   const animate = () => {
     raf = window.requestAnimationFrame(animate)
     const dt = Math.min(0.05, clock.getDelta())
+
+    // FPS calculation
+    frameCount++
+    fpsUpdateTime += dt
+    if (fpsUpdateTime >= 0.5) {
+      currentFPS = frameCount / fpsUpdateTime
+      frameCount = 0
+      fpsUpdateTime = 0
+    }
 
     if (rightMouseDown) {
       camera.quaternion.copy(frozenCameraQuat)
@@ -506,6 +520,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         velocity: velocity,
         grounded: grounded,
         sliding: sliding,
+        fps: currentFPS,
       })
     }
 
