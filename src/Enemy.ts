@@ -17,9 +17,21 @@ export class Enemy {
   private texture: THREE.CanvasTexture
   private time: number = 0
 
+  private spriteSheet: HTMLImageElement
+  private spriteReady = false
+  private pursuitAnimTime = 0
+  private lastDrawnFrame = -1
+
   // Internal resolution
   private readonly width = 16
   private readonly height = 32
+
+  // Sprite sheet (enemy0.png)
+  private readonly frameW = 16
+  private readonly frameH = 32
+  private readonly sheetCols = 4
+  private readonly pursuitFPS = 12
+  private readonly pursuitFrameCount = 7
 
   // Physics
   private velocity = new THREE.Vector3()
@@ -63,6 +75,7 @@ export class Enemy {
     this.canvas.width = this.width
     this.canvas.height = this.height
     this.ctx = this.canvas.getContext('2d')!
+    this.ctx.imageSmoothingEnabled = false
 
     // Create texture with nearest neighbor filtering for pixelated look
     this.texture = new THREE.CanvasTexture(this.canvas)
@@ -91,6 +104,14 @@ export class Enemy {
     setRaycasterFirstHitOnly(this.groundRaycaster, true)
     setRaycasterFirstHitOnly(this.wallRaycaster, true)
 
+    // Load sprite sheet; fall back to checkerboard until ready
+    this.spriteSheet = new Image()
+    this.spriteSheet.onload = () => {
+      this.spriteReady = true
+      this.renderSpriteFrame(0)
+    }
+    this.spriteSheet.src = '/sprites/enemy0.png'
+
     // Initial render
     this.renderCheckerboard()
   }
@@ -110,6 +131,22 @@ export class Enemy {
       }
     }
 
+    this.texture.needsUpdate = true
+  }
+
+  private renderSpriteFrame(frameIndex: number): void {
+    if (!this.spriteReady) return
+    if (frameIndex === this.lastDrawnFrame) return
+
+    const ctx = this.ctx
+    ctx.clearRect(0, 0, this.width, this.height)
+
+    const clamped = ((frameIndex % this.pursuitFrameCount) + this.pursuitFrameCount) % this.pursuitFrameCount
+    const sx = (clamped % this.sheetCols) * this.frameW
+    const sy = Math.floor(clamped / this.sheetCols) * this.frameH
+    ctx.drawImage(this.spriteSheet, sx, sy, this.frameW, this.frameH, 0, 0, this.width, this.height)
+
+    this.lastDrawnFrame = frameIndex
     this.texture.needsUpdate = true
   }
 
@@ -193,6 +230,7 @@ export class Enemy {
 
     // State-based behavior
     if (this.state === 'pursuing') {
+      this.pursuitAnimTime += dt
       // Move towards player
       this.toPlayer.set(playerPosition.x - pos.x, 0, playerPosition.z - pos.z)
       const distance = this.toPlayer.length()
@@ -212,6 +250,7 @@ export class Enemy {
         }
       }
     } else {
+      this.pursuitAnimTime = 0
       // Idle: apply friction
       if (this.grounded) {
         const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z)
@@ -263,8 +302,14 @@ export class Enemy {
     this.cameraPos.y = pos.y // Lock to same Y level
     this.mesh.lookAt(this.cameraPos)
 
-    // Re-render the animated checkerboard
-    this.renderCheckerboard()
+    // Sprite animation
+    if (this.spriteReady) {
+      const frame = this.state === 'pursuing' ? Math.floor(this.pursuitAnimTime * this.pursuitFPS) % this.pursuitFrameCount : 0
+      this.renderSpriteFrame(frame)
+    } else {
+      // Re-render the animated checkerboard while sprites load
+      this.renderCheckerboard()
+    }
   }
 
   dispose(): void {
