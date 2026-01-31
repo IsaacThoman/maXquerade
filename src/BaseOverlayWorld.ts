@@ -60,7 +60,12 @@ export class BaseOverlayWorld {
   private readonly aimAssistDamping = 6
   private readonly aimAssistMaxAngle = Math.PI
 
-  constructor({ aspect, baseImageSrc = '/sprites/mask0.png', animImageSrc = '/sprites/mask1.png', alphaMaskSrc = '/sprites/mask0_alpha.png' }: BaseOverlayWorldOptions) {
+  constructor({
+    aspect,
+    baseImageSrc = '/sprites/mask0.png',
+    animImageSrc = '/sprites/mask0_wider.png',
+    alphaMaskSrc = '/sprites/mask0_wider_alpha.png',
+  }: BaseOverlayWorldOptions) {
     this.scene = new THREE.Scene()
     this.camera = new THREE.PerspectiveCamera(90, aspect, 0.1, 50)
     this.camera.position.set(0, 0, 0.4)
@@ -239,9 +244,25 @@ export class BaseOverlayWorld {
       .then(([baseImage, animImage, alphaMaskImage]) => {
         if (this.disposed) return
         this.baseImage = baseImage
+
+        const frameCount = 4
+        const framesPerRow = 1
+        const frameWidth = Math.max(1, Math.floor(animImage.width / framesPerRow))
+        const frameHeight = Math.max(1, Math.floor(animImage.height / frameCount))
+        if (animImage.height % frameCount !== 0) {
+          console.warn(
+            `[BaseOverlayWorld] animImage height (${animImage.height}) not divisible by frameCount (${frameCount}); using frameHeight=${frameHeight}`,
+          )
+        }
+        if (alphaMaskImage.width !== animImage.width || alphaMaskImage.height !== animImage.height) {
+          console.warn(
+            `[BaseOverlayWorld] alphaMaskImage size (${alphaMaskImage.width}x${alphaMaskImage.height}) differs from animImage size (${animImage.width}x${animImage.height})`,
+          )
+        }
+
         this.canvas = document.createElement('canvas')
-        this.canvas.width = baseImage.width
-        this.canvas.height = baseImage.height
+        this.canvas.width = frameWidth
+        this.canvas.height = frameHeight
         this.ctx = this.canvas.getContext('2d')
         if (!this.ctx) return
         this.ctx.imageSmoothingEnabled = false
@@ -257,9 +278,9 @@ export class BaseOverlayWorld {
         const aspect = this.canvas.width / this.canvas.height
         this.plane.scale.set(aspect, 1, 1)
 
-        this.anim = new SpriteSheet(animImage, 64, 48, {
-          frameCount: 4,
-          framesPerRow: 1,
+        this.anim = new SpriteSheet(animImage, frameWidth, frameHeight, {
+          frameCount,
+          framesPerRow,
         })
 
         this.animX = Math.floor((this.canvas.width - this.anim.frameWidth * this.animScale) / 2)
@@ -267,8 +288,8 @@ export class BaseOverlayWorld {
 
         // Setup alpha mask canvas and texture (same dimensions as main)
         this.alphaMaskCanvas = document.createElement('canvas')
-        this.alphaMaskCanvas.width = baseImage.width
-        this.alphaMaskCanvas.height = baseImage.height
+        this.alphaMaskCanvas.width = this.canvas.width
+        this.alphaMaskCanvas.height = this.canvas.height
         this.alphaMaskCtx = this.alphaMaskCanvas.getContext('2d')
         if (!this.alphaMaskCtx) return
         this.alphaMaskCtx.imageSmoothingEnabled = false
@@ -282,9 +303,9 @@ export class BaseOverlayWorld {
         this.alphaMaskMaterial.needsUpdate = true
         this.alphaMaskPlane.scale.set(aspect, 1, 1)
 
-        this.alphaMaskAnim = new SpriteSheet(alphaMaskImage, 64, 48, {
-          frameCount: 4,
-          framesPerRow: 1,
+        this.alphaMaskAnim = new SpriteSheet(alphaMaskImage, frameWidth, frameHeight, {
+          frameCount,
+          framesPerRow,
         })
 
         this.update(0)
