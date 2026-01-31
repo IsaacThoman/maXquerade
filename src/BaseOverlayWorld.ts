@@ -62,7 +62,7 @@ export class BaseOverlayWorld {
 
   constructor({
     aspect,
-    baseImageSrc = '/sprites/mask0.png',
+    baseImageSrc = '/sprites/mask0_wider.png',
     animImageSrc = '/sprites/mask0_wider.png',
     alphaMaskSrc = '/sprites/mask0_wider_alpha.png',
   }: BaseOverlayWorldOptions) {
