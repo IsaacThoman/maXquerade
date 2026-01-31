@@ -5,6 +5,7 @@ import { StatsOverlay } from './StatsOverlay'
 import { Enemy } from './Enemy'
 import { BaseOverlayWorld } from './BaseOverlayWorld'
 import { computeBoundsTreeOnce, disposeBoundsTreeIfPresent, initThreeMeshBVH, setRaycasterFirstHitOnly } from './bvh'
+import { FrameProfiler } from './FrameProfiler'
 
 type Cleanup = () => void
 
@@ -18,7 +19,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   crosshair.className = 'crosshair'
 
   // Stats overlay
-  const statsOverlay = new StatsOverlay(root, { showVelocity: true, showState: true, showFPS: true })
+  const statsOverlay = new StatsOverlay(root, { showVelocity: true, showState: true, showFPS: true, showTimings: true })
 
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x0b1220)
@@ -340,7 +341,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   }
 
   const clock = new THREE.Clock()
+  const frameProfiler = new FrameProfiler({ windowSize: 60 })
   let raf = 0
+  let lastFrameStart = 0
 
   // FPS tracking
   let frameCount = 0
@@ -349,6 +352,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   const animate = () => {
     raf = window.requestAnimationFrame(animate)
+    const frameStart = performance.now()
+    const rafDtMs = lastFrameStart === 0 ? 0 : frameStart - lastFrameStart
+    lastFrameStart = frameStart
     const dt = Math.min(0.05, clock.getDelta())
 
     // FPS calculation
@@ -365,7 +371,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       camera.updateMatrixWorld()
     }
 
+    let playerMs: number | null = null
+
     if (controls.isLocked) {
+      const playerStart = performance.now()
       // Get camera-relative directions (THE FIX for world-relative controls)
       camera.getWorldDirection(forward)
       forward.y = 0
@@ -531,57 +540,90 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       camera.fov = THREE.MathUtils.lerp(camera.fov, targetFOV, 1 - Math.pow(0.0001, dt))
       camera.updateProjectionMatrix()
 
-      // Update stats overlay
-      statsOverlay.update({
-        position: player.position,
-        velocity: velocity,
-        grounded: grounded,
-        sliding: sliding,
-        fps: currentFPS,
-      })
+      playerMs = performance.now() - playerStart
     }
 
     // Always update enemy physics
+    const enemyStart = performance.now()
     enemy.update({
       dt,
       camera,
       playerPosition: player.position,
       collisionMeshes,
     })
+    const enemyMs = performance.now() - enemyStart
 
+    const overlayStart = performance.now()
     baseOverlayWorld.update(dt, !rightMouseDown)
+    const overlayMs = performance.now() - overlayStart
 
     // === MULTI-PASS RENDERING WITH STENCIL MASKING ===
     // Enemies are only visible through the mask's eye holes
     
     // Pass 1: Clear everything and render the world (map, environment)
+    const renderWorldStart = performance.now()
     renderer.clear(true, true, true) // color, depth, stencil
     renderer.render(scene, camera)
+    const renderWorldMs = performance.now() - renderWorldStart
     
     // Pass 2: Render alpha mask to STENCIL BUFFER ONLY (eye holes)
     // Configure stencil: write 1 where alpha mask is drawn
+    const renderMaskStart = performance.now()
     gl.enable(gl.STENCIL_TEST)
     gl.stencilFunc(gl.ALWAYS, 1, 0xff)
     gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE)
     gl.colorMask(false, false, false, false) // Don't write to color buffer
     gl.depthMask(false) // Don't write to depth buffer
-    
+
     renderer.render(baseOverlayWorld.alphaMaskScene, baseOverlayWorld.alphaMaskCamera)
+    const renderMaskMs = performance.now() - renderMaskStart
     
     // Pass 3: Render enemies ONLY where stencil == 1 (eye holes)
+    const renderEnemiesStart = performance.now()
     gl.stencilFunc(gl.EQUAL, 1, 0xff)
     gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP)
     gl.colorMask(true, true, true, true) // Write to color buffer
     gl.depthMask(true) // Write to depth buffer
-    
+
     renderer.render(enemyScene, camera)
-    
+
     // Disable stencil for the rest
     gl.disable(gl.STENCIL_TEST)
+    const renderEnemiesMs = performance.now() - renderEnemiesStart
     
     // Pass 4: Render the mask overlay on top
+    const renderOverlayStart = performance.now()
     renderer.clearDepth()
     renderer.render(baseOverlayWorld.scene, baseOverlayWorld.camera)
+    const renderOverlayMs = performance.now() - renderOverlayStart
+
+    const renderMs = renderWorldMs + renderMaskMs + renderEnemiesMs + renderOverlayMs
+    const frameMs = performance.now() - frameStart
+    const physicsMs = (playerMs ?? 0) + enemyMs
+
+    frameProfiler.add('frame', frameMs)
+    frameProfiler.add('raf', rafDtMs)
+    frameProfiler.add('physics', physicsMs)
+    if (playerMs !== null) frameProfiler.add('player', playerMs)
+    frameProfiler.add('enemy', enemyMs)
+    frameProfiler.add('overlay', overlayMs)
+    frameProfiler.add('render', renderMs)
+    frameProfiler.add('render.world', renderWorldMs)
+    frameProfiler.add('render.mask', renderMaskMs)
+    frameProfiler.add('render.enemies', renderEnemiesMs)
+    frameProfiler.add('render.overlay', renderOverlayMs)
+
+    if (controls.isLocked) {
+      // Update stats overlay (with rolling averages)
+      statsOverlay.update({
+        position: player.position,
+        velocity: velocity,
+        grounded: grounded,
+        sliding: sliding,
+        fps: currentFPS,
+        timings: frameProfiler.snapshot(),
+      })
+    }
   }
   animate()
 

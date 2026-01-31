@@ -1,4 +1,19 @@
 import * as THREE from 'three'
+import type { FrameTimingKey } from './FrameProfiler'
+
+const TIMING_DISPLAY_ORDER: readonly FrameTimingKey[] = [
+  'raf',
+  'frame',
+  'physics',
+  'player',
+  'enemy',
+  'overlay',
+  'render',
+  'render.world',
+  'render.mask',
+  'render.enemies',
+  'render.overlay',
+]
 
 export interface StatsData {
   position: THREE.Vector3
@@ -6,6 +21,7 @@ export interface StatsData {
   grounded?: boolean
   sliding?: boolean
   fps?: number
+  timings?: Partial<Record<FrameTimingKey, number>>
 }
 
 /**
@@ -18,8 +34,12 @@ export class StatsOverlay {
   private velocityElement: HTMLElement | null = null
   private stateElement: HTMLElement | null = null
   private fpsElement: HTMLElement | null = null
+  private timingElements: Partial<Record<FrameTimingKey, HTMLElement>> | null = null
 
-  constructor(parent: HTMLElement, options: { showVelocity?: boolean; showState?: boolean; showFPS?: boolean } = {}) {
+  constructor(
+    parent: HTMLElement,
+    options: { showVelocity?: boolean; showState?: boolean; showFPS?: boolean; showTimings?: boolean } = {},
+  ) {
     this.container = document.createElement('div')
     this.container.className = 'stats-overlay'
 
@@ -47,6 +67,17 @@ export class StatsOverlay {
       this.fpsElement = document.createElement('div')
       this.fpsElement.className = 'stats-row'
       this.container.appendChild(this.fpsElement)
+    }
+
+    // Optional timing / profiling display
+    if (options.showTimings) {
+      this.timingElements = {}
+      for (const key of TIMING_DISPLAY_ORDER) {
+        const el = document.createElement('div')
+        el.className = 'stats-row stats-row--timing'
+        this.container.appendChild(el)
+        this.timingElements[key] = el
+      }
     }
 
     parent.appendChild(this.container)
@@ -87,6 +118,19 @@ export class StatsOverlay {
     if (this.fpsElement && data.fps !== undefined) {
       this.fpsElement.innerHTML = `<span class="stats-label">fps</span> <span class="stats-value">${data.fps.toFixed(1)}</span>`
     }
+
+    // Update timing breakdown if enabled
+    if (this.timingElements) {
+      for (const key of TIMING_DISPLAY_ORDER) {
+        const el = this.timingElements[key]
+        if (!el) continue
+
+        const raw = data.timings?.[key]
+        const shown = raw === undefined ? '--' : formatMs(raw)
+
+        el.innerHTML = `<span class="stats-label">ms ${escapeTimingLabel(timingLabelForKey(key))}</span> <span class="stats-value">${shown}</span>`
+      }
+    }
   }
 
   /**
@@ -95,4 +139,22 @@ export class StatsOverlay {
   destroy(): void {
     this.container.remove()
   }
+}
+
+function formatMs(ms: number): string {
+  if (!Number.isFinite(ms)) return '--'
+  if (ms < 1) return ms.toFixed(3)
+  if (ms < 10) return ms.toFixed(2)
+  return ms.toFixed(1)
+}
+
+function escapeTimingLabel(label: string): string {
+  // Labels are hard-coded keys, but keep this safe for future extension.
+  return label.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+function timingLabelForKey(key: FrameTimingKey): string {
+  if (key === 'raf') return 'raf(dt)'
+  if (key === 'frame') return 'cpu'
+  return key
 }
