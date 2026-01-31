@@ -3,6 +3,7 @@ import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockCont
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { StatsOverlay } from './StatsOverlay'
 import { Enemy } from './Enemy'
+import { SpriteSheet } from './SpriteSheet'
 
 type Cleanup = () => void
 
@@ -60,23 +61,77 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const overlayPlane = new THREE.Mesh(overlayPlaneGeometry, overlayPlaneMaterial)
   overlayScene.add(overlayPlane)
 
-  const overlayTextureLoader = new THREE.TextureLoader()
-  let overlayTexture: THREE.Texture | null = null
-  overlayTextureLoader.load('/sprites/mask0.png', (texture) => {
-    overlayTexture = texture
-    texture.magFilter = THREE.NearestFilter
-    texture.minFilter = THREE.NearestFilter
-    texture.generateMipmaps = false
+  let overlayTexture: THREE.CanvasTexture | null = null
+  let overlayCanvas: HTMLCanvasElement | null = null
+  let overlayCtx: CanvasRenderingContext2D | null = null
+  let overlayBaseImage: HTMLImageElement | null = null
+  let overlayAnim: SpriteSheet | null = null
+  let overlayAnimX = 0
+  let overlayAnimY = 0
+  let overlayAnimScale = 1
+  let overlayAnimFrame = 0
+  let overlayAnimTimer = 0
+  const overlayAnimFps = 8
 
-    overlayPlaneMaterial.map = texture
-    overlayPlaneMaterial.needsUpdate = true
+  const loadImage = (src: string) =>
+    new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image()
+      img.decoding = 'async'
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error(`Failed to load image: ${src}`))
+      img.src = src
+    })
 
-    const image = texture.image as HTMLImageElement | undefined
-    if (image && image.width && image.height) {
-      const aspect = image.width / image.height
-      overlayPlane.scale.set(aspect, 1, 1)
+  const renderOverlay = (dt: number) => {
+    if (!overlayCanvas || !overlayCtx || !overlayBaseImage || !overlayAnim || !overlayTexture) return
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height)
+    overlayCtx.drawImage(overlayBaseImage, 0, 0)
+    if (overlayAnim.frameCount > 1 && overlayAnimFps > 0) {
+      const frameDuration = 1 / overlayAnimFps
+      overlayAnimTimer += dt
+      while (overlayAnimTimer >= frameDuration) {
+        overlayAnimTimer -= frameDuration
+        overlayAnimFrame = (overlayAnimFrame + 1) % overlayAnim.frameCount
+      }
     }
-  })
+    overlayAnim.drawFrame(overlayCtx, overlayAnimFrame, overlayAnimX, overlayAnimY, overlayAnimScale)
+    overlayTexture.needsUpdate = true
+  }
+
+  Promise.all([loadImage('/sprites/mask0.png'), loadImage('/sprites/mask1.png')])
+    .then(([baseImage, animImage]) => {
+      overlayBaseImage = baseImage
+      overlayCanvas = document.createElement('canvas')
+      overlayCanvas.width = baseImage.width
+      overlayCanvas.height = baseImage.height
+      overlayCtx = overlayCanvas.getContext('2d')
+      if (!overlayCtx) return
+      overlayCtx.imageSmoothingEnabled = false
+
+      overlayTexture = new THREE.CanvasTexture(overlayCanvas)
+      overlayTexture.magFilter = THREE.NearestFilter
+      overlayTexture.minFilter = THREE.NearestFilter
+      overlayTexture.generateMipmaps = false
+
+      overlayPlaneMaterial.map = overlayTexture
+      overlayPlaneMaterial.needsUpdate = true
+
+      const aspect = overlayCanvas.width / overlayCanvas.height
+      overlayPlane.scale.set(aspect, 1, 1)
+
+      overlayAnim = new SpriteSheet(animImage, 64, 48, {
+        frameCount: 4,
+        framesPerRow: 1,
+      })
+
+      overlayAnimX = Math.floor((overlayCanvas.width - overlayAnim.frameWidth * overlayAnimScale) / 2)
+      overlayAnimY = Math.floor((overlayCanvas.height - overlayAnim.frameHeight * overlayAnimScale) / 2)
+
+      renderOverlay(0)
+    })
+    .catch((error) => {
+      console.error(error)
+    })
 
   // Player config
   const playerHeight = 1.7
@@ -563,6 +618,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       playerPosition: player.position,
       collisionMeshes,
     })
+
+    renderOverlay(dt)
 
     renderer.clear()
     renderer.render(scene, camera)
