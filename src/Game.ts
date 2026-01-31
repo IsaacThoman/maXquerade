@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { StatsOverlay } from './StatsOverlay'
+import { Enemy } from './Enemy'
 
 type Cleanup = () => void
 
@@ -10,6 +12,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   const crosshair = document.createElement('div')
   crosshair.className = 'crosshair'
+
+  // Stats overlay
+  const statsOverlay = new StatsOverlay(root, { showVelocity: true, showState: true })
 
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x0b1220)
@@ -58,6 +63,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   sun.shadow.camera.top = 80
   sun.shadow.camera.bottom = -80
   scene.add(sun)
+
+  // Create enemy at specified position with pursuing state
+  const enemy = new Enemy(new THREE.Vector3(-5.42, 1.70, -5.07), 'pursuing')
+  scene.add(enemy.mesh)
 
   // Load map.glb
   const loader = new GLTFLoader()
@@ -450,6 +459,22 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       const targetFOV = 90 + Math.min(speed * 0.1, 6) // Up to 96 FOV at high speed
       camera.fov = THREE.MathUtils.lerp(camera.fov, targetFOV, 1 - Math.pow(0.0001, dt))
       camera.updateProjectionMatrix()
+
+      // Update stats overlay
+      statsOverlay.update({
+        position: player.position,
+        velocity: velocity,
+        grounded: grounded,
+        sliding: sliding,
+      })
+
+      // Update enemy
+      enemy.update({
+        dt,
+        camera,
+        playerPosition: player.position,
+        collisionMeshes,
+      })
     }
 
     renderer.render(scene, camera)
@@ -467,6 +492,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     document.removeEventListener('keyup', onKeyUp)
     document.removeEventListener('click', autoLock)
 
+    enemy.dispose()
+    statsOverlay.destroy()
     renderer.dispose()
     root.innerHTML = ''
   }
