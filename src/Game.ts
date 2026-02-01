@@ -861,7 +861,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   // Create start button instead of auto-lock
   const startButton = document.createElement('button')
-  startButton.textContent = 'Click to Play'
+  startButton.textContent = 'click to focus'
   startButton.style.cssText = `
     position: fixed;
     top: 50%;
