@@ -94,6 +94,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const player = controls.object
   scene.add(player)
 
+  // Soundtrack audio (loops)
+  const soundtrack = new Audio('soundtrack.mp3')
+  soundtrack.loop = true
+  soundtrack.volume = 0.5
+
   // Initialize GameLoop for level progression
   const gameLoop = new GameLoop()
 
@@ -985,10 +990,12 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   // Handle pointer lock state changes
   controls.addEventListener('lock', () => {
     hideStartButton()
+    soundtrack.play().catch(() => {})
   })
   
   controls.addEventListener('unlock', () => {
     showStartButton()
+    soundtrack.pause()
   })
   
   root.appendChild(startButton)
@@ -1916,6 +1923,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     handViewModel.dispose()
     statsOverlay.destroy()
     renderer.dispose()
+    
+    // Stop and cleanup soundtrack
+    soundtrack.pause()
+    soundtrack.src = ''
+    
     root.innerHTML = ''
   }
 }
