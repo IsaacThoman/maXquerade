@@ -709,7 +709,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     pos.y -= enemy.halfHeight * 0.5 // Spawn slightly below center
 
     const fx = new Projectile(pos, new THREE.Vector3(0, 0, 0), {
-      spriteSrc: '/sprites/mageSmoke.png',
+      spriteSrc: 'sprites/mageSmoke.png',
       frameWidth: 32,
       frameHeight: 32,
       frameCount: 1,
