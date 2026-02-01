@@ -79,7 +79,6 @@ body {
 
 .stats-row {
   background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
   padding: 4px 8px;
   border-radius: 4px;
   margin-bottom: 4px;
@@ -87,8 +86,6 @@ body {
 }
 
 .stats-row--timing {
-  /* Backdrop blur is expensive; keep timing rows cheap. */
-  backdrop-filter: none;
   background: rgba(0, 0, 0, 0.35);
 }
 
