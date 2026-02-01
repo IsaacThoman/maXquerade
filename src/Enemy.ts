@@ -57,14 +57,15 @@ export class Enemy {
   private readonly stuckThreshold = 0.5 // minimum movement to not be considered stuck
   private readonly stuckTimeLimit = 2.0 // seconds before considering stuck
 
+  private spawnPosition = new THREE.Vector3()
   // Enemy3 (mage) behavior state
   private mageOrbitAngle = 0
-  private mageOrbitRadius = 8.0
+  private mageOrbitRadius = 5.0
   private mageOrbitSpeed = 1.5 // radians per second
   private mageOrbitCenter = new THREE.Vector3()
   private mageVerticalOscillation = 0
-  private mageLastSpawnTime = -8.0 // Start at -8 so first spawn can happen soon after spawn
-  private readonly mageSpawnCooldown = 8.0 // Spawn enemy every 8 seconds
+  private mageLastSpawnTime = -4.0 // Start at -4 so first spawn can happen soon after spawn
+  private readonly mageSpawnCooldown = 4.0 // Spawn enemy every 4 seconds
   private mageSpawnEvent = false
   private mageSpawnFxEvent = false // Event to spawn the billboard FX
 
@@ -166,7 +167,8 @@ export class Enemy {
     this.mesh = new THREE.Mesh(geometry, material)
     this.mesh.position.copy(position)
     
-    // Initialize lastPosition for stuck detection
+    // Initialize spawn position and lastPosition for stuck detection
+    this.spawnPosition.copy(position)
     this.lastPosition.copy(position)
 
     this.state = state
@@ -435,14 +437,11 @@ export class Enemy {
   }
 
   /**
-   * Enemy3 (mage) behavior: moves sporadically/circularly around player, spawns enemies
+   * Enemy3 (mage) behavior: circles around spawn point, spawns enemies
    */
-  private updateMageBehavior(dt: number, pos: THREE.Vector3, playerPosition: THREE.Vector3): void {
-    // Update orbit center to follow player (with some lag for smoother movement)
-    const lerpSpeed = 0.5
-    this.mageOrbitCenter.x = THREE.MathUtils.lerp(this.mageOrbitCenter.x, playerPosition.x, lerpSpeed * dt)
-    this.mageOrbitCenter.z = THREE.MathUtils.lerp(this.mageOrbitCenter.z, playerPosition.z, lerpSpeed * dt)
-    this.mageOrbitCenter.y = playerPosition.y
+  private updateMageBehavior(dt: number, pos: THREE.Vector3, _playerPosition: THREE.Vector3): void {
+    // Use spawn position as the orbit center
+    this.mageOrbitCenter.copy(this.spawnPosition)
 
     // Add sporadic variation to orbit speed and radius
     const sporadicSpeed = this.mageOrbitSpeed + Math.sin(this.time * 2.3) * 0.8 + Math.sin(this.time * 3.7) * 0.5
@@ -546,10 +545,9 @@ export class Enemy {
         this.rusherStateTimer = 0
         this.hitPlayerThisRush = false
       }
-      // Initialize mage orbit center when starting to pursue (for enemy3)
+      // Initialize mage orbit angle when starting to pursue (for enemy3)
       if (this.type === 3) {
-        this.mageOrbitCenter.copy(playerPosition)
-        this.mageOrbitAngle = Math.atan2(pos.z - playerPosition.z, pos.x - playerPosition.x)
+        this.mageOrbitAngle = Math.atan2(pos.z - this.spawnPosition.z, pos.x - this.spawnPosition.x)
       }
     } else if (this.state === 'pursuing' && distance > 25.0 && !hasLoS) {
       // Stop pursuing when the player is too far and out of sight.
