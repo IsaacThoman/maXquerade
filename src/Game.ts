@@ -111,6 +111,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   ]
 
   const projectiles: Projectile[] = []
+  const effects: Projectile[] = []
 
   for (const e of enemies) {
     if (e.type === 0) unmaskedEnemyScene.add(e.mesh)
@@ -674,16 +675,88 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         playerPosition: player.position,
         collisionMeshes,
       })
+
+      if (e.consumeExplosionEvent()) {
+        const fx = new Projectile(e.mesh.position.clone(), new THREE.Vector3(0, 0, 0), {
+          spriteSrc: '/sprites/explode_reordered.png',
+          frameWidth: 200,
+          frameHeight: 282,
+          frameCount: 17,
+          framesPerRow: 17,
+          fps: 24,
+          size: 5.0,
+          billboard: 'full',
+          alphaTest: 0.05,
+          gravity: 0,
+          drag: 0,
+          lifetimeSeconds: 17 / 24,
+          collisionRadius: 0,
+          collideWithWorld: false,
+          maxBounces: 0,
+          bounceRestitution: 0,
+        })
+
+        scene.add(fx.mesh)
+        effects.push(fx)
+      }
     }
     const enemyMs = performance.now() - enemyStart
 
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const p = projectiles[i]
       p.update({ dt, camera, collisionMeshes })
+
+      // Projectile vs enemy collision
+      if (p.alive) {
+        const px = p.mesh.position.x
+        const py = p.mesh.position.y
+        const pz = p.mesh.position.z
+
+        for (let j = enemies.length - 1; j >= 0; j--) {
+          const e = enemies[j]
+          if (!e.isHittable) continue
+
+          const ex = e.mesh.position.x
+          const ey = e.mesh.position.y
+          const ez = e.mesh.position.z
+
+          const dx = px - ex
+          const dz = pz - ez
+          const r = e.hitRadius + p.collisionRadius
+          if (dx * dx + dz * dz > r * r) continue
+
+          const dy = Math.abs(py - ey)
+          if (dy > e.halfHeight + p.collisionRadius) continue
+
+          // Hit!
+          p.alive = false
+          e.kill()
+
+          if (e.type !== 0) {
+            // For now, non-type-0 enemies just disappear.
+            maskedEnemyScene.remove(e.mesh)
+            e.dispose()
+            enemies.splice(j, 1)
+          }
+
+          break
+        }
+      }
+
       if (!p.alive) {
         scene.remove(p.mesh)
         p.dispose()
         projectiles.splice(i, 1)
+      }
+    }
+
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const fx = effects[i]
+      fx.update({ dt, camera })
+      if (!fx.alive) {
+        scene.remove(fx.mesh)
+        fx.dispose()
+        effects.splice(i, 1)
       }
     }
 
@@ -804,14 +877,18 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     }
 
      for (const e of enemies) e.dispose()
-     for (const p of projectiles) {
-       scene.remove(p.mesh)
-       p.dispose()
-     }
-     baseOverlayWorld.dispose()
-     handViewModel.dispose()
-     statsOverlay.destroy()
-     renderer.dispose()
-     root.innerHTML = ''
+      for (const p of projectiles) {
+        scene.remove(p.mesh)
+        p.dispose()
+      }
+      for (const fx of effects) {
+        scene.remove(fx.mesh)
+        fx.dispose()
+      }
+      baseOverlayWorld.dispose()
+      handViewModel.dispose()
+      statsOverlay.destroy()
+      renderer.dispose()
+      root.innerHTML = ''
    }
 }
