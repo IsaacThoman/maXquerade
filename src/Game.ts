@@ -1250,6 +1250,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     
     // Update fade overlay
     fadeOverlay.style.opacity = gameLoop.fadeAlpha.toString()
+    // Set fade color: red for death, black for level advance
+    fadeOverlay.style.background = gameLoop.fadeReason === 'player-death' ? 'red' : 'black'
     
     // Show/hide mask collection animation
     if (gameLoop.phase === 'restarting' && gameLoop.fadeReason === 'level-advance') {
