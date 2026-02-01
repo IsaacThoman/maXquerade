@@ -123,8 +123,8 @@ export class BaseOverlayWorld {
 
   constructor({
     aspect,
-    animImageSrc = '/sprites/mask0_wider.png',
-    alphaMaskSrc = '/sprites/mask0_wider_alpha.png',
+    animImageSrc = 'sprites/mask0_wider.png',
+    alphaMaskSrc = 'sprites/mask0_wider_alpha.png',
   }: BaseOverlayWorldOptions) {
     this.scene = new THREE.Scene()
     this.camera = new THREE.PerspectiveCamera(90, aspect, 0.1, 50)
@@ -211,8 +211,8 @@ export class BaseOverlayWorld {
     this.plane2BasePos.copy(this.plane2.position)
     this.updateCamera()
     this.loadAssets(animImageSrc, alphaMaskSrc)
-    this.loadAssetsMask1('/sprites/mask1.png', '/sprites/mask1_alpha.png')
-    this.loadAssetsMask2('/sprites/mask2.png', '/sprites/mask2_alpha.png')
+    this.loadAssetsMask1('sprites/mask1.png', 'sprites/mask1_alpha.png')
+    this.loadAssetsMask2('sprites/mask2.png', 'sprites/mask2_alpha.png')
   }
 
   get isEnabled(): boolean {

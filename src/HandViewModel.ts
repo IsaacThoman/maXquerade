@@ -51,7 +51,7 @@ export class HandViewModel {
   private readonly rightMargin = 0
   private spriteAspect = 1
 
-  constructor({ aspect, imageSrc = '/sprites/hand.png', idleFps = 12, throwFps = 12 }: HandViewModelOptions) {
+  constructor({ aspect, imageSrc = 'sprites/hand.png', idleFps = 12, throwFps = 12 }: HandViewModelOptions) {
     this.idleFps = idleFps
     this.throwFps = throwFps
 

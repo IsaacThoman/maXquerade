@@ -155,7 +155,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const groundItems: WorldItem[] = []
 
   const worldItems = {
-    spriteSrc: '/sprites/worlditems.png',
+    spriteSrc: 'sprites/worlditems.png',
     frameWidth: 32,
     frameHeight: 32,
     frameCount: 4,
@@ -305,7 +305,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   maskIcon.style.cssText = `
     width: 128px;
     height: 128px;
-    background-image: url('/sprites/worlditems.png');
+    background-image: url('sprites/worlditems.png');
     background-size: 256px 256px;
     background-position: 0px 0px;
     image-rendering: pixelated;
@@ -356,7 +356,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   secondMaskIcon.style.cssText = `
     width: 160px;
     height: 160px;
-    background-image: url('/sprites/worlditems.png');
+    background-image: url('sprites/worlditems.png');
     background-size: 320px 320px;
     background-position: 0px 0px;
     image-rendering: pixelated;
@@ -436,7 +436,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   const spawnExplosion = (worldPos: THREE.Vector3): void => {
     const fx = new Projectile(worldPos.clone(), new THREE.Vector3(0, 0, 0), {
-      spriteSrc: '/sprites/explode_reordered.png',
+      spriteSrc: 'sprites/explode_reordered.png',
       frameWidth: 200,
       frameHeight: 282,
       frameCount: 17,
@@ -465,7 +465,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   // Load map.glb
   const loader = new GLTFLoader()
-  loader.load('/map.glb', (gltf) => {
+  loader.load('map.glb', (gltf) => {
     const map = gltf.scene
     mapRoot = map
     map.traverse((child) => {
@@ -551,7 +551,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       .addScaledVector(velocity, 0.25)
 
     const p = new Projectile(projectileSpawnPos, projectileVelocity, {
-      spriteSrc: '/sprites/knife_projectile.png',
+      spriteSrc: 'sprites/knife_projectile.png',
       frameWidth: 32,
       frameHeight: 32,
       frameCount: 4,
@@ -604,7 +604,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     clearEnemyChargeFx(enemy)
     computeEnemyOrbMuzzle(enemy, player.position, enemyOrbMuzzlePos)
     const fx = new Projectile(enemyOrbMuzzlePos.clone(), new THREE.Vector3(0, 0, 0), {
-      spriteSrc: '/sprites/enemyProjectile.png',
+      spriteSrc: 'sprites/enemyProjectile.png',
       frameWidth: 16,
       frameHeight: 16,
       frameCount: 4,
@@ -636,7 +636,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     enemyOrbVel.multiplyScalar(16)
 
     const p = new Projectile(enemyOrbMuzzlePos.clone(), enemyOrbVel.clone(), {
-      spriteSrc: '/sprites/enemyProjectile.png',
+      spriteSrc: 'sprites/enemyProjectile.png',
       frameWidth: 16,
       frameHeight: 16,
       frameCount: 4,

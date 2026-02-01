@@ -159,7 +159,7 @@ export class TankAttack {
   
   private async loadSpriteSheet(): Promise<void> {
     try {
-      const img = await this.loadImage('/sprites/TankAttackParticles.png')
+      const img = await this.loadImage('sprites/TankAttackParticles.png')
       this.sheet = new SpriteSheet(img, 16, 16, {
         frameCount: 4,
         framesPerRow: 4,
