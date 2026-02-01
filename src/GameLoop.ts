@@ -57,7 +57,12 @@ export class GameLoop {
         { type: 3, position: new THREE.Vector3(13, 5, -1), state: 'idle' }
       ],
       waitForPlayerMovement: true
-    }
+    },
+    // Level 5: No enemies (doors should be fully open)
+    {
+      enemies: [],
+      waitForPlayerMovement: false,
+    },
   ]
   
   // Track if player has moved

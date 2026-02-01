@@ -62,9 +62,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const item0Id = 0 as const
   const item1Id = 1 as const
   const item2Id = 2 as const
+  const item3Id = 3 as const
   baseOverlayWorld.setMask0Enabled(inventory.has(item0Id))
   baseOverlayWorld.setMask1Enabled(inventory.has(item1Id))
   baseOverlayWorld.setMask2Enabled(inventory.has(item2Id))
+  baseOverlayWorld.setMask3Enabled(inventory.has(item3Id))
 
   const handViewModel = new HandViewModel({
     aspect: Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
@@ -441,6 +443,27 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
     scene.add(gi.mesh)
     groundItems.push({ id: item2Id, gi })
+  }
+
+  const spawnWorldItem3 = (worldPos: THREE.Vector3, _sourceHalfHeight: number): void => {
+    if (inventory.has(item3Id)) return
+    if (hasWorldItemInWorld(item3Id)) return
+
+    const dropPos = worldPos.clone()
+    // Keep it close to the ground so the player can always pick it up.
+    dropPos.y = 1.5
+
+    const gi = new GroundItem(dropPos, {
+      ...worldItems,
+      frameIndex: 2, // unused sprite in worlditems.png
+      size: 1.1,
+      bobAmplitude: 0.22,
+      bobFrequencyHz: 0.5,
+      spinSpeedRadPerSec: 1,
+    })
+
+    scene.add(gi.mesh)
+    groundItems.push({ id: item3Id, gi })
   }
 
   const spawnExplosion = (worldPos: THREE.Vector3): void => {
@@ -1292,6 +1315,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         if (e.type === 0) {
           spawnWorldItem0(e.mesh.position, e.halfHeight)
         }
+
+        // Type 3 enemies drop mask3 on first kill (same rules as other types)
+        if (e.type === 3) {
+          spawnWorldItem3(e.mesh.position, e.halfHeight)
+        }
         
         // Type 3 enemies also have death animation - clean up after explosion
         if (e.type === 3) {
@@ -1480,6 +1508,18 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         gameLoop.triggerMaskPickup()
         
         // Play ding sound
+        const audio = new Audio('/sounds/ding.mp3')
+        audio.volume = 0.5
+        audio.play().catch(() => {})
+      }
+
+      if (wi.id === item3Id) {
+        // Reset overlay to only show mask3 in the primary slot.
+        baseOverlayWorld.resetToOnlyMask3()
+
+        console.log('ITEM 3 PICKED UP! Triggering level transition...')
+        gameLoop.triggerMaskPickup()
+
         const audio = new Audio('/sounds/ding.mp3')
         audio.volume = 0.5
         audio.play().catch(() => {})
@@ -1777,6 +1817,12 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     if (gameLoop.currentLevel === 2) { // About to go to level 4 (index 3)
       console.log('Opening second door for level 4...')
       removeNextDoor()
+    }
+
+    // Going to the no-enemy level: open/remove all remaining doors.
+    if (gameLoop.currentLevel === 3) { // About to go to level 5 (index 4)
+      console.log('Opening all remaining doors for level 5...')
+      while (nextDoorIndex <= 5) removeNextDoor()
     }
     console.log('Starting next level...')
     gameLoop.startNextLevel()
