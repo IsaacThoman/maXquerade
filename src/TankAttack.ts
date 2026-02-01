@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { SpriteSheet } from './SpriteSheet'
+import { setRaycasterFirstHitOnly } from './bvh'
 
 type TankAttackUpdateParams = {
   dt: number
@@ -23,11 +24,18 @@ export class TankAttack {
   private readonly direction = new THREE.Vector3()
   private readonly cameraPos = new THREE.Vector3()
   private actualDistance = 0 // Distance to wall or original target
+  private collisionMeshes: THREE.Mesh[] = []
+  private readonly raycaster = new THREE.Raycaster()
   
-  constructor(startPos: THREE.Vector3, targetPos: THREE.Vector3) {
+  constructor(startPos: THREE.Vector3, targetPos: THREE.Vector3, collisionMeshes: THREE.Mesh[] = []) {
     this.startPos.copy(startPos)
     this.targetPos.copy(targetPos)
     this.direction.subVectors(targetPos, startPos).normalize()
+    this.collisionMeshes = collisionMeshes
+    setRaycasterFirstHitOnly(this.raycaster, true)
+    
+    // Calculate actual distance to wall
+    this.calculateWallDistance()
     
     // Create particle meshes - each gets its own texture
     for (let i = 0; i < this.particleCount; i++) {
@@ -69,11 +77,6 @@ export class TankAttack {
     if (this.ageSeconds >= this.buildDuration) {
       this.alive = false
       return
-    }
-    
-    // Calculate actual distance to wall (extend laser to walls)
-    if (this.actualDistance === 0) {
-      this.calculateWallDistance()
     }
     
     // Calculate build progress (0 to 1)
@@ -178,9 +181,25 @@ export class TankAttack {
   }
   
   private calculateWallDistance(): void {
-    // Simple extension: extend the laser by 50% to account for walls
-    const originalDistance = this.startPos.distanceTo(this.targetPos)
-    this.actualDistance = originalDistance * 1.5
+    // Raycast to find wall collision
+    if (this.collisionMeshes.length > 0) {
+      this.raycaster.set(this.startPos, this.direction)
+      this.raycaster.far = 100 // Max distance
+      
+      const hits: THREE.Intersection[] = []
+      this.raycaster.intersectObjects(this.collisionMeshes, false, hits)
+      
+      if (hits.length > 0) {
+        this.actualDistance = hits[0].distance
+      } else {
+        // No wall hit, use max distance
+        this.actualDistance = 50
+      }
+    } else {
+      // No collision meshes, extend by 3x
+      const originalDistance = this.startPos.distanceTo(this.targetPos)
+      this.actualDistance = originalDistance * 3.0
+    }
     
     // Update target position to the wall distance
     this.targetPos.copy(this.startPos).addScaledVector(this.direction, this.actualDistance)

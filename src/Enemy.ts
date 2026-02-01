@@ -5,7 +5,7 @@ import {Vector3} from "three";
 
 export type EnemyState = 'idle' | 'pursuing' | 'dying' | 'dead'
 
-export type EnemyType = 'default' | 'tank'
+export type EnemyType = 0 | 1
 
 export interface EnemyUpdateParams {
   dt: number
@@ -16,7 +16,7 @@ export interface EnemyUpdateParams {
 
 export class Enemy {
   readonly mesh: THREE.Mesh
-  readonly type: number | undefined
+  readonly type: EnemyType
   private canvas: HTMLCanvasElement
   private ctx: CanvasRenderingContext2D
   private texture: THREE.CanvasTexture
@@ -88,7 +88,7 @@ export class Enemy {
     new THREE.Vector3(-0.707, 0, -0.707),
   ]
 
-  constructor(position: Vector3, state: EnemyState = 'idle', type?: number) {
+  constructor(position: Vector3, state: EnemyState = 'idle', type: EnemyType = 0) {
     initThreeMeshBVH()
 
     this.type = type
@@ -410,7 +410,8 @@ export class Enemy {
         if (attackElapsed >= this.attackPreparationTime && this.attacks.length === 0) {
           const attack = new TankAttack(
             pos.clone(),
-            playerPosition.clone()
+            playerPosition.clone(),
+            collisionMeshes
           )
           this.attacks.push(attack)
         }
