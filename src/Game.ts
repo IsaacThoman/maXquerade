@@ -77,6 +77,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const collisionMeshes: THREE.Mesh[] = []
   const collisionGeometries = new Set<THREE.BufferGeometry>()
 
+  // Door removal state
+  let nextDoorIndex = 1
+  let mapRoot: THREE.Group | null = null
+
   // Lighting
   const hemi = new THREE.HemisphereLight(0xbad2ff, 0x141118, 0.9)
   scene.add(hemi)
@@ -112,6 +116,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const loader = new GLTFLoader()
   loader.load('/map.glb', (gltf) => {
     const map = gltf.scene
+    mapRoot = map
     map.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh
@@ -239,6 +244,33 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   const isOverlayRotateHeld = () => rightMouseDown || zDown
 
+  const removeNextDoor = () => {
+    if (!mapRoot || nextDoorIndex > 5) return
+    
+    const doorName = `Door${nextDoorIndex}`
+    let doorFound = false
+    
+    mapRoot.traverse((child) => {
+      if (doorFound) return
+      if (child.name === doorName) {
+        // Remove from collision meshes
+        child.traverse((descendant) => {
+          if ((descendant as THREE.Mesh).isMesh) {
+            const mesh = descendant as THREE.Mesh
+            const index = collisionMeshes.indexOf(mesh)
+            if (index > -1) {
+              collisionMeshes.splice(index, 1)
+            }
+          }
+        })
+        // Remove from scene
+        child.parent?.remove(child)
+        doorFound = true
+        nextDoorIndex++
+      }
+    })
+  }
+
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.repeat) return
     switch (event.code) {
@@ -274,6 +306,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       case 'KeyZ':
         zDown = true
         frozenCameraQuat.copy(camera.quaternion)
+        break
+      case 'KeyO':
+        removeNextDoor()
         break
     }
   }
