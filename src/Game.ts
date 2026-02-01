@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { StatsOverlay } from './StatsOverlay'
 import { Enemy } from './Enemy'
 import { BaseOverlayWorld } from './BaseOverlayWorld'
+import { HandViewModel } from './HandViewModel'
 import { computeBoundsTreeOnce, disposeBoundsTreeIfPresent, initThreeMeshBVH, setRaycasterFirstHitOnly } from './bvh'
 import { FrameProfiler } from './FrameProfiler'
 
@@ -41,6 +42,12 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   const baseOverlayWorld = new BaseOverlayWorld({
     aspect: Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
+  })
+
+  const handViewModel = new HandViewModel({
+    aspect: Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
+    idleFps: 6,
+    throwFps: 12,
   })
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true })
@@ -268,6 +275,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   }
 
   const onMouseDown = (event: MouseEvent) => {
+    if (event.button === 0) {
+      handViewModel.triggerThrow()
+      return
+    }
     if (event.button !== 2) return
     rightMouseDown = true
     frozenCameraQuat.copy(camera.quaternion)
@@ -294,6 +305,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     camera.aspect = w / h
     camera.updateProjectionMatrix()
     baseOverlayWorld.onResize(w, h)
+    handViewModel.onResize(w, h)
     renderer.setSize(w, h)
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
   }
@@ -579,6 +591,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
     const overlayStart = performance.now()
     baseOverlayWorld.update(dt, !isOverlayRotateHeld())
+    handViewModel.update(dt)
     const overlayMs = performance.now() - overlayStart
 
     // === MULTI-PASS RENDERING WITH STENCIL MASKING ===
@@ -620,13 +633,19 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     gl.disable(gl.STENCIL_TEST)
     const renderEnemiesMaskedMs = performance.now() - renderEnemiesMaskedStart
     
-    // Pass 4: Render the mask overlay on top
+    // Pass 4: Render hand viewmodel (beneath mask overlay)
+    const renderHandStart = performance.now()
+    renderer.clearDepth()
+    renderer.render(handViewModel.scene, handViewModel.camera)
+    const renderHandMs = performance.now() - renderHandStart
+
+    // Pass 5: Render the mask overlay on top of everything
     const renderOverlayStart = performance.now()
     renderer.clearDepth()
     renderer.render(baseOverlayWorld.scene, baseOverlayWorld.camera)
     const renderOverlayMs = performance.now() - renderOverlayStart
 
-    const renderMs = renderWorldMs + renderEnemiesUnmaskedMs + renderMaskMs + renderEnemiesMaskedMs + renderOverlayMs
+    const renderMs = renderWorldMs + renderEnemiesUnmaskedMs + renderMaskMs + renderEnemiesMaskedMs + renderOverlayMs + renderHandMs
     const frameMs = performance.now() - frameStart
     const physicsMs = (playerMs ?? 0) + enemyMs
 
@@ -643,6 +662,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     frameProfiler.add('render.mask', renderMaskMs)
     frameProfiler.add('render.enemies.masked', renderEnemiesMaskedMs)
     frameProfiler.add('render.overlay', renderOverlayMs)
+    frameProfiler.add('render.hand', renderHandMs)
 
     if (controls.isLocked) {
       // Update stats overlay (with rolling averages)
@@ -683,6 +703,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
      for (const e of enemies) e.dispose()
      baseOverlayWorld.dispose()
+     handViewModel.dispose()
      statsOverlay.destroy()
      renderer.dispose()
      root.innerHTML = ''
