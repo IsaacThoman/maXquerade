@@ -50,6 +50,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   const inventory = new Inventory()
   const item0Id = 0 as const
+  const item1Id = 1 as const
   baseOverlayWorld.setEnabled(inventory.has(item0Id))
 
   const handViewModel = new HandViewModel({
@@ -112,8 +113,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   // Type 0: always visible
   // Type 1: only visible through mask alpha
   const enemies: Enemy[] = [
-    new Enemy(new THREE.Vector3(2, 5.0, -11), 'idle', 0),
-    new Enemy(new THREE.Vector3(-3, 5.0, -15), 'idle', 1),
+    new Enemy(new THREE.Vector3(-3, 5.0, -11), 'idle', 0),
+    new Enemy(new THREE.Vector3(1, 5.0, -20), 'idle', 1),
   ]
 
   const projectiles: Projectile[] = []
@@ -149,6 +150,26 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
     scene.add(gi.mesh)
     groundItems.push({ id: item0Id, gi })
+  }
+
+  const spawnWorldItem1 = (worldPos: THREE.Vector3, sourceHalfHeight: number): void => {
+    if (inventory.has(item1Id)) return
+    if (hasWorldItemInWorld(item1Id)) return
+
+    const dropPos = worldPos.clone()
+    dropPos.y = worldPos.y - sourceHalfHeight + 1
+
+    const gi = new GroundItem(dropPos, {
+      ...worldItems,
+      frameIndex: 1,
+      size: 1.1,
+      bobAmplitude: 0.22,
+      bobFrequencyHz: 0.5,
+      spinSpeedRadPerSec: 1,
+    })
+
+    scene.add(gi.mesh)
+    groundItems.push({ id: item1Id, gi })
   }
 
   const spawnExplosion = (worldPos: THREE.Vector3): void => {
@@ -282,7 +303,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       collisionRadius: 0.16,
       collideWithWorld: true,
       bounceRestitution: 0.9,
-      maxBounces: 10,
+      maxBounces: 4,
     })
 
     scene.add(p.mesh)
@@ -807,6 +828,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
           if (e.type !== 0) {
             // No death animation: explode immediately.
             spawnExplosion(e.mesh.position)
+
+            if (e.type === 1) {
+              spawnWorldItem1(e.mesh.position, e.halfHeight)
+            }
 
             // For now, non-type-0 enemies just disappear.
             maskedEnemyScene.remove(e.mesh)

@@ -42,7 +42,7 @@ export class BaseOverlayWorld {
 
   private euler = new THREE.Euler(0, 0, 0, 'YXZ')
   private yaw = 0
-  private pitch = -Math.PI * 0.5
+  private pitch = -Math.PI * 0.45
   private readonly minPitch = -Math.PI * 0.49
   private readonly maxPitch = THREE.MathUtils.degToRad(20)
   private disposed = false
