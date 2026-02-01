@@ -65,7 +65,7 @@ export class Enemy {
   private mageOrbitCenter = new THREE.Vector3()
   private mageVerticalOscillation = 0
   private mageLastSpawnTime = -4.0 // Start at -4 so first spawn can happen soon after spawn
-  private readonly mageSpawnCooldown = 4.0 // Spawn enemy every 4 seconds
+  private readonly mageSpawnCooldown = 3 // Spawn enemy every 4 seconds
   private mageSpawnEvent = false
   private mageSpawnFxEvent = false // Event to spawn the billboard FX
 
