@@ -124,13 +124,13 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   } as const
 
   // Ground item pickup (first sprite from 2x2 worlditems sheet)
-  const worldItem0 = new GroundItem(new THREE.Vector3(18, 1.7, -20), {
+  const worldItem0 = new GroundItem(new THREE.Vector3(18, 1, -20), {
     ...worldItems,
     frameIndex: 0,
     size: 1.1,
     bobAmplitude: 0.22,
-    bobFrequencyHz: 1.2,
-    spinSpeedRadPerSec: 2.4,
+    bobFrequencyHz: 0.5,
+    spinSpeedRadPerSec: 1,
   })
   scene.add(worldItem0.mesh)
   groundItems.push(worldItem0)
