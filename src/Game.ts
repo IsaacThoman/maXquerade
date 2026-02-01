@@ -112,7 +112,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   // Type 0: always visible
   // Type 1: only visible through mask alpha
   const enemies: Enemy[] = [
-    new Enemy(new THREE.Vector3(2, 5.0, -20), 'idle', 0),
+    new Enemy(new THREE.Vector3(2, 5.0, -11), 'idle', 0),
     new Enemy(new THREE.Vector3(-3, 5.0, -15), 'idle', 1),
   ]
 
