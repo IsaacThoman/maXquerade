@@ -86,6 +86,16 @@ export class BaseOverlayWorld {
   private readonly aimAssistDamping = 6
   private readonly aimAssistMaxAngle = Math.PI
 
+  // Pane retraction (lerp unfocused panes behind camera)
+  private currentlyAimed: 'mask0' | 'mask1' | null = null
+  private isRotating = false // true when right-click/Z held
+  private readonly retractDamping = 8
+  private mask0RetractT = 0 // 0 = normal, 1 = fully retracted
+  private mask1RetractT = 0
+  private readonly plane0BasePos = new THREE.Vector3(0, 0, 0)
+  private readonly plane1BasePos = new THREE.Vector3()
+  private readonly tempVec = new THREE.Vector3()
+
   constructor({
     aspect,
     animImageSrc = '/sprites/mask0_wider.png',
@@ -147,6 +157,9 @@ export class BaseOverlayWorld {
     this.alphaMaskScene.add(this.alphaMaskPlane1)
 
     this.positionSecondaryMaskPlanes()
+    // Store base positions for retraction lerp
+    this.plane0BasePos.copy(this.plane.position)
+    this.plane1BasePos.copy(this.plane1.position)
     this.updateCamera()
     this.loadAssets(animImageSrc, alphaMaskSrc)
     this.loadAssetsMask1('/sprites/mask1.png', '/sprites/mask1_alpha.png')
@@ -172,6 +185,8 @@ export class BaseOverlayWorld {
 
   update(dt: number, aimAssistActive = false): void {
     const aimed = aimAssistActive ? this.applyAimAssist(dt) : null
+    this.currentlyAimed = aimed
+    this.isRotating = !aimAssistActive
 
     const mask0Last = Math.max(0, (this.anim?.frameCount ?? 1) - 1)
     const mask1Last = Math.max(0, (this.anim1?.frameCount ?? 1) - 1)
@@ -208,6 +223,9 @@ export class BaseOverlayWorld {
       this.alphaMaskAnim1.drawFrame(this.alphaMaskCtx1, this.mask1Frame, this.mask1AnimX, this.mask1AnimY, this.animScale)
       this.alphaMaskTexture1.needsUpdate = true
     }
+
+    // Retract unfocused panes behind camera when one is being looked at
+    this.updatePaneRetraction(dt)
   }
 
   handleMouseMove(event: MouseEvent, allowRotation: boolean): void {
@@ -254,6 +272,45 @@ export class BaseOverlayWorld {
     this.camera.quaternion.setFromEuler(this.euler)
     // Keep alpha mask camera in sync
     this.alphaMaskCamera.quaternion.setFromEuler(this.euler)
+  }
+
+  private updatePaneRetraction(dt: number): void {
+    // Determine target retraction for each pane:
+    // - If rotating (right-click held), bring all panes back (target = 0)
+    // - If a pane is being aimed at, retract the OTHER pane (target = 1)
+    // - If no pane is aimed at, bring all back (target = 0)
+    let targetMask0Retract = 0
+    let targetMask1Retract = 0
+
+    if (!this.isRotating && this.currentlyAimed !== null) {
+      // One pane is focused - retract the other
+      if (this.currentlyAimed === 'mask0' && this.mask1Enabled) {
+        targetMask1Retract = 1
+      } else if (this.currentlyAimed === 'mask1' && this.mask0Enabled) {
+        targetMask0Retract = 1
+      }
+    }
+
+    // Lerp retraction values
+    const t = 1 - Math.exp(-this.retractDamping * dt)
+    this.mask0RetractT = THREE.MathUtils.lerp(this.mask0RetractT, targetMask0Retract, t)
+    this.mask1RetractT = THREE.MathUtils.lerp(this.mask1RetractT, targetMask1Retract, t)
+
+    // Get direction opposite to where camera is looking (behind the camera's view)
+    this.camera.getWorldDirection(this.tempVec)
+    this.tempVec.negate() // now points behind/opposite to where camera faces
+
+    const retractDistance = 0.5
+
+    // Plane 0: move from base position in the "behind view" direction
+    this.plane.position.copy(this.plane0BasePos)
+    this.plane.position.addScaledVector(this.tempVec, this.mask0RetractT * retractDistance)
+    this.alphaMaskPlane.position.copy(this.plane.position)
+
+    // Plane 1: move from base position in the "behind view" direction
+    this.plane1.position.copy(this.plane1BasePos)
+    this.plane1.position.addScaledVector(this.tempVec, this.mask1RetractT * retractDistance)
+    this.alphaMaskPlane1.position.copy(this.plane1.position)
   }
 
   private applyAimAssist(dt: number): 'mask0' | 'mask1' | null {
