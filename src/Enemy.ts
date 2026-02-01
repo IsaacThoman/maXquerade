@@ -5,7 +5,7 @@ import {Vector3} from "three";
 
 export type EnemyState = 'idle' | 'pursuing' | 'dying' | 'dead'
 
-export type EnemyType = 0 | 1 | 2
+export type EnemyType = 0 | 1 | 2 | 3
 
 export interface EnemyUpdateParams {
   dt: number
@@ -56,6 +56,17 @@ export class Enemy {
   private stuckTimer = 0
   private readonly stuckThreshold = 0.5 // minimum movement to not be considered stuck
   private readonly stuckTimeLimit = 2.0 // seconds before considering stuck
+
+  // Enemy3 (mage) behavior state
+  private mageOrbitAngle = 0
+  private mageOrbitRadius = 8.0
+  private mageOrbitSpeed = 1.5 // radians per second
+  private mageOrbitCenter = new THREE.Vector3()
+  private mageVerticalOscillation = 0
+  private mageLastSpawnTime = -8.0 // Start at -8 so first spawn can happen soon after spawn
+  private readonly mageSpawnCooldown = 8.0 // Spawn enemy every 8 seconds
+  private mageSpawnEvent = false
+  private mageSpawnFxEvent = false // Event to spawn the billboard FX
 
   private spriteSheet: HTMLImageElement
   private spriteReady = false
@@ -424,6 +435,75 @@ export class Enemy {
   }
 
   /**
+   * Enemy3 (mage) behavior: moves sporadically/circularly around player, spawns enemies
+   */
+  private updateMageBehavior(dt: number, pos: THREE.Vector3, playerPosition: THREE.Vector3): void {
+    // Update orbit center to follow player (with some lag for smoother movement)
+    const lerpSpeed = 0.5
+    this.mageOrbitCenter.x = THREE.MathUtils.lerp(this.mageOrbitCenter.x, playerPosition.x, lerpSpeed * dt)
+    this.mageOrbitCenter.z = THREE.MathUtils.lerp(this.mageOrbitCenter.z, playerPosition.z, lerpSpeed * dt)
+    this.mageOrbitCenter.y = playerPosition.y
+
+    // Add sporadic variation to orbit speed and radius
+    const sporadicSpeed = this.mageOrbitSpeed + Math.sin(this.time * 2.3) * 0.8 + Math.sin(this.time * 3.7) * 0.5
+    const sporadicRadius = this.mageOrbitRadius + Math.sin(this.time * 1.7) * 2.0 + Math.cos(this.time * 2.9) * 1.5
+
+    // Update orbit angle
+    this.mageOrbitAngle += sporadicSpeed * dt
+
+    // Calculate target position on orbit
+    const targetX = this.mageOrbitCenter.x + Math.cos(this.mageOrbitAngle) * sporadicRadius
+    const targetZ = this.mageOrbitCenter.z + Math.sin(this.mageOrbitAngle) * sporadicRadius
+
+    // Vertical oscillation for floating effect
+    this.mageVerticalOscillation = Math.sin(this.time * 1.5) * 0.5 + Math.sin(this.time * 2.1) * 0.3
+
+    // Apply vertical oscillation to Y velocity for floating effect
+    const targetYOffset = this.mageVerticalOscillation
+    const currentYOffset = pos.y - this.mageOrbitCenter.y
+    this.velocity.y = (targetYOffset - currentYOffset) * 3.0
+
+    // Move toward target position
+    const dx = targetX - pos.x
+    const dz = targetZ - pos.z
+    const dist = Math.sqrt(dx * dx + dz * dz)
+
+    if (dist > 0.5) {
+      const speed = Math.min(this.moveSpeed * 1.5, dist * 3) // Speed up when far, slow down when close
+      this.velocity.x = (dx / dist) * speed
+      this.velocity.z = (dz / dist) * speed
+    } else {
+      this.velocity.x *= 0.9
+      this.velocity.z *= 0.9
+    }
+
+    // Check if it's time to spawn an enemy (can spawn regardless of LoS or distance)
+    if (this.time - this.mageLastSpawnTime >= this.mageSpawnCooldown) {
+      this.mageLastSpawnTime = this.time
+      this.mageSpawnEvent = true
+      this.mageSpawnFxEvent = true
+    }
+  }
+
+  /**
+   * Consume the spawn event (returns true once when a spawn should happen)
+   */
+  consumeMageSpawnEvent(): boolean {
+    const v = this.mageSpawnEvent
+    this.mageSpawnEvent = false
+    return v
+  }
+
+  /**
+   * Consume the spawn FX event (returns true once when the FX should be shown)
+   */
+  consumeMageSpawnFxEvent(): boolean {
+    const v = this.mageSpawnFxEvent
+    this.mageSpawnFxEvent = false
+    return v
+  }
+
+  /**
    * Update the enemy - call each frame
    */
   update(params: EnemyUpdateParams): void {
@@ -466,9 +546,27 @@ export class Enemy {
         this.rusherStateTimer = 0
         this.hitPlayerThisRush = false
       }
+      // Initialize mage orbit center when starting to pursue (for enemy3)
+      if (this.type === 3) {
+        this.mageOrbitCenter.copy(playerPosition)
+        this.mageOrbitAngle = Math.atan2(pos.z - playerPosition.z, pos.x - playerPosition.x)
+      }
     } else if (this.state === 'pursuing' && distance > 25.0 && !hasLoS) {
       // Stop pursuing when the player is too far and out of sight.
-      this.state = 'idle'
+      // Exception: enemy3 (mage) continues pursuing as long as it's alive
+      if (this.type !== 3) {
+        this.state = 'idle'
+      }
+    }
+    
+    // Enemy3 (mage) can start spawning enemies even while idle
+    if (this.type === 3 && this.alive) {
+      // Check if it's time to spawn an enemy (can spawn regardless of state)
+      if (this.time - this.mageLastSpawnTime >= this.mageSpawnCooldown) {
+        this.mageLastSpawnTime = this.time
+        this.mageSpawnEvent = true
+        this.mageSpawnFxEvent = true
+      }
     }
 
     // Enemy0 orb attack state machine (charge -> shoot)
@@ -510,6 +608,9 @@ export class Enemy {
       // Enemy2 (rusher) special behavior
       if (this.type === 2) {
         this.updateRusherBehavior(dt, pos, playerPosition, collisionMeshes)
+      } else if (this.type === 3) {
+        // Enemy3 (mage) special behavior - circular/sporadic movement
+        this.updateMageBehavior(dt, pos, playerPosition)
       } else {
         // Enemy0 keeps a bit more distance from the player.
         const desiredDistance = this.type === 0 ? 6.0 : this.type === 1 ? this.tankPreferredDistance : 1.5

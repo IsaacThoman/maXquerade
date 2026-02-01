@@ -43,6 +43,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const maskedEnemyScene2 = new THREE.Scene()
   maskedEnemyScene2.fog = new THREE.Fog(0x0b1220, 20, 120)
 
+  // Type 3 enemies: only visible through mask2_alpha
+  const maskedEnemyScene3 = new THREE.Scene()
+  maskedEnemyScene3.fog = new THREE.Fog(0x0b1220, 20, 120)
+
   const camera = new THREE.PerspectiveCamera(
     90, // Wider FOV for speed feel
     Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
@@ -210,12 +214,15 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       // Type 0: always visible
       // Type 1: only visible through mask0_alpha
       // Type 2: only visible through mask1_alpha
+      // Type 3: only visible through mask2_alpha
       if (enemyConfig.type === 0) {
         unmaskedEnemyScene.add(enemy.mesh)
       } else if (enemyConfig.type === 1) {
         maskedEnemyScene.add(enemy.mesh)
       } else if (enemyConfig.type === 2) {
         maskedEnemyScene2.add(enemy.mesh)
+      } else if (enemyConfig.type === 3) {
+        maskedEnemyScene3.add(enemy.mesh)
       }
     })
   }
@@ -240,6 +247,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         maskedEnemyScene.remove(enemy.mesh)
       } else if (enemy.type === 2) {
         maskedEnemyScene2.remove(enemy.mesh)
+      } else if (enemy.type === 3) {
+        maskedEnemyScene3.remove(enemy.mesh)
       }
 
       const fx = enemyChargeFxByEnemy.get(enemy)
@@ -659,6 +668,73 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
     scene.add(p.mesh)
     enemyProjectiles.push(p)
+  }
+
+  // Map to track mage smoke FX by enemy
+  const mageSmokeFxByEnemy = new Map<Enemy, Projectile>()
+
+  const spawnMageSmokeFx = (enemy: Enemy): void => {
+    // Clear any existing FX for this enemy
+    const existingFx = mageSmokeFxByEnemy.get(enemy)
+    if (existingFx) {
+      scene.remove(existingFx.mesh)
+      existingFx.dispose()
+      mageSmokeFxByEnemy.delete(enemy)
+    }
+
+    const pos = enemy.mesh.position.clone()
+    pos.y -= enemy.halfHeight * 0.5 // Spawn slightly below center
+
+    const fx = new Projectile(pos, new THREE.Vector3(0, 0, 0), {
+      spriteSrc: '/sprites/mageSmoke.png',
+      frameWidth: 32,
+      frameHeight: 32,
+      frameCount: 1,
+      framesPerRow: 1,
+      fps: 1,
+      size: 6.0, // Large billboard effect
+      billboard: 'full',
+      alphaTest: 0.1,
+      gravity: 0,
+      drag: 0,
+      lifetimeSeconds: 1.5, // Show for 1.5 seconds
+      collisionRadius: 0,
+      collideWithWorld: false,
+      drawScaleStart: 0.3,
+      drawScaleTarget: 1.5,
+      drawScaleDuration: 1.5,
+    })
+
+    scene.add(fx.mesh)
+    mageSmokeFxByEnemy.set(enemy, fx)
+    effects.push(fx)
+  }
+
+  // Spawn a random enemy type (0, 1, or 2) near the mage
+  const spawnRandomEnemyFromMage = (mageEnemy: Enemy): void => {
+    const randomType = Math.floor(Math.random() * 3) as 0 | 1 | 2
+    const magePos = mageEnemy.mesh.position
+
+    // Spawn slightly offset from mage position
+    const offsetX = (Math.random() - 0.5) * 4
+    const offsetZ = (Math.random() - 0.5) * 4
+    const spawnPos = new THREE.Vector3(magePos.x + offsetX, magePos.y, magePos.z + offsetZ)
+
+    const newEnemy = new Enemy(spawnPos, 'pursuing', randomType)
+    enemies.push(newEnemy)
+    currentEnemies.push(newEnemy)
+    gameLoop.currentEnemies.push(newEnemy)
+
+    // Add to appropriate scene based on type
+    if (randomType === 0) {
+      unmaskedEnemyScene.add(newEnemy.mesh)
+    } else if (randomType === 1) {
+      maskedEnemyScene.add(newEnemy.mesh)
+    } else if (randomType === 2) {
+      maskedEnemyScene2.add(newEnemy.mesh)
+    }
+
+    console.log(`Mage spawned enemy type ${randomType} at`, spawnPos)
   }
 
   // Raycasters for collision
@@ -1211,6 +1287,30 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         if (e.type === 0) {
           spawnWorldItem0(e.mesh.position, e.halfHeight)
         }
+        
+        // Type 3 enemies also have death animation - clean up after explosion
+        if (e.type === 3) {
+          // Clean up mage smoke FX if any
+          const smokeFx = mageSmokeFxByEnemy.get(e)
+          if (smokeFx) {
+            scene.remove(smokeFx.mesh)
+            smokeFx.dispose()
+            mageSmokeFxByEnemy.delete(e)
+          }
+          
+          // Remove from scene
+          maskedEnemyScene3.remove(e.mesh)
+          
+          // Remove from arrays
+          const enemyIndex = enemies.indexOf(e)
+          if (enemyIndex > -1) enemies.splice(enemyIndex, 1)
+          const currentIndex = currentEnemies.indexOf(e)
+          if (currentIndex > -1) currentEnemies.splice(currentIndex, 1)
+          const gameLoopIndex = gameLoop.currentEnemies.indexOf(e)
+          if (gameLoopIndex > -1) gameLoop.currentEnemies.splice(gameLoopIndex, 1)
+          
+          e.dispose()
+        }
       }
 
       // Enemy0 orb attack visuals + projectile spawn
@@ -1259,6 +1359,31 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
           if (verticalDist <= currentHeight + e.halfHeight) {
             // Enemy2 hit player - kill player
             damagePlayer(playerHealth)
+          }
+        }
+      }
+
+      // Enemy3 (mage) spawn attack - spawns random enemies
+      if (e.type === 3 && e.alive) {
+        // Check for spawn FX event
+        if (e.consumeMageSpawnFxEvent()) {
+          spawnMageSmokeFx(e)
+        }
+
+        // Check for spawn event (spawns a random enemy)
+        if (e.consumeMageSpawnEvent()) {
+          spawnRandomEnemyFromMage(e)
+        }
+
+        // Update smoke FX position to follow mage
+        const smokeFx = mageSmokeFxByEnemy.get(e)
+        if (smokeFx) {
+          smokeFx.mesh.position.copy(e.mesh.position)
+          smokeFx.mesh.position.y -= e.halfHeight * 0.5
+          smokeFx.update({ dt, camera })
+
+          if (!smokeFx.alive) {
+            mageSmokeFxByEnemy.delete(e)
           }
         }
       }
@@ -1390,7 +1515,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
           p.alive = false
           e.kill()
 
-          if (e.type !== 0) {
+          // Type 0 and type 3 have death animations (handled in Enemy.ts)
+          // Type 1 and type 2 explode immediately
+          if (e.type !== 0 && e.type !== 3) {
             // No death animation: explode immediately.
             spawnExplosion(e.mesh.position)
 
@@ -1475,6 +1602,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     // Type 0 enemies: always visible
     // Type 1 enemies: only visible through mask0_alpha
     // Type 2 enemies: only visible through mask1_alpha
+    // Type 3 enemies: only visible through mask2_alpha
     
     // Pass 1: Clear everything and render the world (map, environment)
     const renderWorldStart = performance.now()
@@ -1490,6 +1618,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     let renderMaskMs = 0
     let renderEnemiesMaskedMs = 0
     let renderEnemiesMasked2Ms = 0
+    let renderEnemiesMasked3Ms = 0
     let renderOverlayMs = 0
 
     if (baseOverlayWorld.isEnabled) {
@@ -1502,9 +1631,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       gl.colorMask(false, false, false, false) // Don't write to color buffer
       gl.depthMask(false) // Don't write to depth buffer
 
-      // Only render mask0 alpha, hide mask1 alpha
+      // Only render mask0 alpha, hide others
       baseOverlayWorld.setMask0AlphaVisible(true)
       baseOverlayWorld.setMask1AlphaVisible(false)
+      baseOverlayWorld.setMask2AlphaVisible(false)
       renderer.render(baseOverlayWorld.alphaMaskScene, baseOverlayWorld.alphaMaskCamera)
 
       // Pass 3a: Render type 1 enemies ONLY where stencil == 1
@@ -1525,9 +1655,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       gl.colorMask(false, false, false, false) // Don't write to color buffer
       gl.depthMask(false) // Don't write to depth buffer
 
-      // Only render mask1 alpha, hide mask0 alpha
+      // Only render mask1 alpha, hide others
       baseOverlayWorld.setMask0AlphaVisible(false)
       baseOverlayWorld.setMask1AlphaVisible(true)
+      baseOverlayWorld.setMask2AlphaVisible(false)
       renderer.render(baseOverlayWorld.alphaMaskScene, baseOverlayWorld.alphaMaskCamera)
 
       // Pass 3b: Render type 2 enemies ONLY where stencil == 1
@@ -1537,15 +1668,40 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       gl.depthMask(true) // Write to depth buffer
 
       renderer.render(maskedEnemyScene2, camera)
+      renderEnemiesMasked2Ms = performance.now() - renderMask2Start
+
+      // ===== STENCIL PASS 3: Type 3 enemies through mask2_alpha =====
+      // Pass 2c: Clear stencil and render mask2_alpha
+      const renderMask3Start = performance.now()
+      gl.clear(gl.STENCIL_BUFFER_BIT) // Clear stencil buffer
+      gl.stencilFunc(gl.ALWAYS, 1, 0xff)
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE)
+      gl.colorMask(false, false, false, false) // Don't write to color buffer
+      gl.depthMask(false) // Don't write to depth buffer
+
+      // Only render mask2 alpha, hide others
+      baseOverlayWorld.setMask0AlphaVisible(false)
+      baseOverlayWorld.setMask1AlphaVisible(false)
+      baseOverlayWorld.setMask2AlphaVisible(true)
+      renderer.render(baseOverlayWorld.alphaMaskScene, baseOverlayWorld.alphaMaskCamera)
+
+      // Pass 3c: Render type 3 enemies ONLY where stencil == 1
+      gl.stencilFunc(gl.EQUAL, 1, 0xff)
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP)
+      gl.colorMask(true, true, true, true) // Write to color buffer
+      gl.depthMask(true) // Write to depth buffer
+
+      renderer.render(maskedEnemyScene3, camera)
+      renderEnemiesMasked3Ms = performance.now() - renderMask3Start
 
       // Disable stencil for the rest
       gl.disable(gl.STENCIL_TEST)
       renderEnemiesMaskedMs = performance.now() - renderMaskStart
-      renderEnemiesMasked2Ms = performance.now() - renderMask2Start
       
-      // Restore both alpha masks for next frame
+      // Restore all alpha masks for next frame
       baseOverlayWorld.setMask0AlphaVisible(true)
       baseOverlayWorld.setMask1AlphaVisible(true)
+      baseOverlayWorld.setMask2AlphaVisible(true)
     }
     
     // Pass 4: Render hand viewmodel (beneath mask overlay)
@@ -1562,7 +1718,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       renderOverlayMs = performance.now() - renderOverlayStart
     }
 
-    const renderMs = renderWorldMs + renderEnemiesUnmaskedMs + renderMaskMs + renderEnemiesMaskedMs + renderEnemiesMasked2Ms + renderOverlayMs + renderHandMs
+    const renderMs = renderWorldMs + renderEnemiesUnmaskedMs + renderMaskMs + renderEnemiesMaskedMs + renderEnemiesMasked2Ms + renderEnemiesMasked3Ms + renderOverlayMs + renderHandMs
     const frameMs = performance.now() - frameStart
     const physicsMs = (playerMs ?? 0) + enemyMs
 
@@ -1574,11 +1730,12 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     frameProfiler.add('overlay', overlayMs)
     frameProfiler.add('render', renderMs)
     frameProfiler.add('render.world', renderWorldMs)
-    frameProfiler.add('render.enemies', renderEnemiesUnmaskedMs + renderEnemiesMaskedMs + renderEnemiesMasked2Ms)
+    frameProfiler.add('render.enemies', renderEnemiesUnmaskedMs + renderEnemiesMaskedMs + renderEnemiesMasked2Ms + renderEnemiesMasked3Ms)
     frameProfiler.add('render.enemies.unmasked', renderEnemiesUnmaskedMs)
     frameProfiler.add('render.mask', renderMaskMs)
     frameProfiler.add('render.enemies.masked', renderEnemiesMaskedMs)
     frameProfiler.add('render.enemies.masked2', renderEnemiesMasked2Ms)
+    frameProfiler.add('render.enemies.masked3', renderEnemiesMasked3Ms)
     frameProfiler.add('render.overlay', renderOverlayMs)
     frameProfiler.add('render.hand', renderHandMs)
 
@@ -1611,6 +1768,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     clearLevel()
     console.log('Opening door...')
     removeNextDoor() // Open the next door
+    // Level 4 (index 3) opens 2 doors instead of 1
+    if (gameLoop.currentLevel === 2) { // About to go to level 4 (index 3)
+      console.log('Opening second door for level 4...')
+      removeNextDoor()
+    }
     console.log('Starting next level...')
     gameLoop.startNextLevel()
     console.log('Resetting player...')

@@ -4,7 +4,7 @@ import { Enemy } from './Enemy'
 export type GamePhase = 'intro' | 'playing' | 'enemy-defeated' | 'fade-out' | 'fade-in' | 'restarting'
 
 export interface EnemyConfig {
-  type: 0 | 1 | 2
+  type: 0 | 1 | 2 | 3
   position: THREE.Vector3
   state: 'idle' | 'pursuing'
 }
@@ -50,10 +50,11 @@ export class GameLoop {
       ],
       waitForPlayerMovement: true
     },
-    // Level 4: Test level with enemy2 (rusher)
+    // Level 4: Two enemy3 (mages) - visible only through mask2
     {
       enemies: [
-        { type: 2, position: new THREE.Vector3(0, 3.0, -20), state: 'pursuing' }
+        { type: 3, position: new THREE.Vector3(32, 5, -23), state: 'idle' },
+        { type: 3, position: new THREE.Vector3(13, 5, -1), state: 'idle' }
       ],
       waitForPlayerMovement: true
     }
