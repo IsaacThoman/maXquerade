@@ -854,6 +854,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       case 'KeyP':
         statsOverlay.toggleVisible()
         break
+      case 'KeyT':
+        player.position.set(17, 3, -20)
+        break
     }
   }
 
