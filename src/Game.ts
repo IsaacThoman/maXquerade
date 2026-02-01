@@ -6,6 +6,7 @@ import { Enemy } from './Enemy'
 import { BaseOverlayWorld } from './BaseOverlayWorld'
 import { HandViewModel } from './HandViewModel'
 import { Projectile } from './Projectile'
+import { GroundItem } from './GroundItem'
 import { computeBoundsTreeOnce, disposeBoundsTreeIfPresent, initThreeMeshBVH, setRaycasterFirstHitOnly } from './bvh'
 import { FrameProfiler } from './FrameProfiler'
 
@@ -112,6 +113,27 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   const projectiles: Projectile[] = []
   const effects: Projectile[] = []
+  const groundItems: GroundItem[] = []
+
+  const worldItems = {
+    spriteSrc: '/sprites/worlditems.png',
+    frameWidth: 32,
+    frameHeight: 32,
+    frameCount: 4,
+    framesPerRow: 2,
+  } as const
+
+  // Ground item pickup (first sprite from 2x2 worlditems sheet)
+  const worldItem0 = new GroundItem(new THREE.Vector3(18, 1.7, -20), {
+    ...worldItems,
+    frameIndex: 0,
+    size: 1.1,
+    bobAmplitude: 0.22,
+    bobFrequencyHz: 1.2,
+    spinSpeedRadPerSec: 2.4,
+  })
+  scene.add(worldItem0.mesh)
+  groundItems.push(worldItem0)
 
   const spawnExplosion = (worldPos: THREE.Vector3): void => {
     const fx = new Projectile(worldPos.clone(), new THREE.Vector3(0, 0, 0), {
@@ -706,6 +728,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     }
     const enemyMs = performance.now() - enemyStart
 
+    for (const gi of groundItems) {
+      gi.update({ dt, camera })
+    }
+
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const p = projectiles[i]
       p.update({ dt, camera, collisionMeshes })
@@ -883,19 +909,24 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       disposeBoundsTreeIfPresent(geometry)
     }
 
-     for (const e of enemies) e.dispose()
-      for (const p of projectiles) {
-        scene.remove(p.mesh)
-        p.dispose()
-      }
-      for (const fx of effects) {
-        scene.remove(fx.mesh)
-        fx.dispose()
-      }
-      baseOverlayWorld.dispose()
-      handViewModel.dispose()
-      statsOverlay.destroy()
-      renderer.dispose()
-      root.innerHTML = ''
-   }
+    for (const e of enemies) e.dispose()
+    for (const p of projectiles) {
+      scene.remove(p.mesh)
+      p.dispose()
+    }
+    for (const fx of effects) {
+      scene.remove(fx.mesh)
+      fx.dispose()
+    }
+    for (const gi of groundItems) {
+      scene.remove(gi.mesh)
+      gi.dispose()
+    }
+
+    baseOverlayWorld.dispose()
+    handViewModel.dispose()
+    statsOverlay.destroy()
+    renderer.dispose()
+    root.innerHTML = ''
+  }
 }
