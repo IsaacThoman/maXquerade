@@ -10,6 +10,7 @@ import { GroundItem } from './GroundItem'
 import { computeBoundsTreeOnce, disposeBoundsTreeIfPresent, initThreeMeshBVH, setRaycasterFirstHitOnly } from './bvh'
 import { FrameProfiler } from './FrameProfiler'
 import { Inventory } from './Inventory'
+import { GameLoop } from './GameLoop'
 
 type Cleanup = () => void
 
@@ -110,13 +111,16 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   sun.shadow.camera.bottom = -80
   scene.add(sun)
 
+  // Initialize GameLoop for level progression
+  const gameLoop = new GameLoop()
+  
+  // Enemy management - now supports multiple enemies per level
+  let currentEnemies: Enemy[] = []
+  
   // Create enemies (spawn high to let gravity settle)
   // Type 0: always visible
   // Type 1: only visible through mask alpha
-  const enemies: Enemy[] = [
-    new Enemy(new THREE.Vector3(-3, 5.0, -11), 'idle', 0),
-    new Enemy(new THREE.Vector3(1, 5.0, -20), 'idle', 1),
-  ]
+  const enemies: Enemy[] = []
 
   const projectiles: Projectile[] = []
   const effects: Projectile[] = []
@@ -132,10 +136,232 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   } as const
 
   const hasWorldItemInWorld = (id: number): boolean => groundItems.some((gi) => gi.id === id)
-
+  
+  // Level management functions
+  const spawnLevelEnemy = (): void => {
+    // Clear existing enemies
+    currentEnemies.forEach(enemy => {
+      const index = enemies.indexOf(enemy)
+      if (index > -1) enemies.splice(index, 1)
+      
+      if (enemy.type === 0) {
+        unmaskedEnemyScene.remove(enemy.mesh)
+      } else {
+        maskedEnemyScene.remove(enemy.mesh)
+      }
+      
+      enemy.dispose()
+    })
+    currentEnemies = []
+    
+    // Get level config
+    const config = gameLoop.getCurrentLevelConfig()
+    
+    // Create all enemies for this level
+    config.enemies.forEach(enemyConfig => {
+      const enemy = new Enemy(enemyConfig.position, enemyConfig.state, enemyConfig.type)
+      enemies.push(enemy)
+      currentEnemies.push(enemy)
+      gameLoop.currentEnemies.push(enemy) // Track in GameLoop for special level logic
+      
+      // Add to appropriate scene based on type
+      if (enemyConfig.type === 0) {
+        unmaskedEnemyScene.add(enemy.mesh)
+      } else {
+        maskedEnemyScene.add(enemy.mesh)
+      }
+    })
+  }
+  
+  const clearLevel = (): void => {
+    // Remove all current enemies
+    currentEnemies.forEach(enemy => {
+      const index = enemies.indexOf(enemy)
+      if (index > -1) enemies.splice(index, 1)
+      
+      if (enemy.type === 0) {
+        unmaskedEnemyScene.remove(enemy.mesh)
+      } else {
+        maskedEnemyScene.remove(enemy.mesh)
+      }
+      
+      enemy.dispose()
+    })
+    currentEnemies = []
+    gameLoop.currentEnemies = [] // Also clear GameLoop's enemy tracking
+    
+    // Clear attacks from any remaining enemies
+    enemies.forEach(e => {
+      e.attacks.forEach(a => a.dispose())
+      e.attacks = []
+    })
+  }
+  
+  const resetPlayer = (): void => {
+    console.log('RESETTING PLAYER to start position (0, 1.7, 0)')
+    player.position.set(0, playerHeight, 0)
+    velocity.set(0, 0, 0)
+    camera.rotation.set(0, 0, 0)
+    console.log('Player position after reset:', player.position)
+  }
+  
+  // Create fade overlay with smooth transition
+  const fadeOverlay = document.createElement('div')
+  fadeOverlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: black;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1000;
+    transition: opacity 0.1s linear;
+  `
+  root.appendChild(fadeOverlay)
+  
+  // Create mask collection animation container (shows during black screen)
+  const maskCollectAnimation = document.createElement('div')
+  maskCollectAnimation.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1500;
+    background: transparent;
+  `
+  
+  // Big mask icon - using actual sprite from worlditems.png (frame 0)
+  const maskIcon = document.createElement('div')
+  maskIcon.style.cssText = `
+    width: 128px;
+    height: 128px;
+    background-image: url('/sprites/worlditems.png');
+    background-size: 256px 256px;
+    background-position: 0px 0px;
+    image-rendering: pixelated;
+    animation: maskBounce 0.6s ease-out;
+  `
+  
+  // +1 text
+  const plusOneText = document.createElement('div')
+  plusOneText.style.cssText = `
+    font-size: 48px;
+    font-weight: bold;
+    color: #00ff00;
+    margin-left: 20px;
+    animation: plusOnePop 0.5s ease-out 0.3s both;
+    text-shadow: 0 0 20px #00ff00;
+  `
+  plusOneText.textContent = '+1'
+  
+  // Container for icon and text
+  const contentContainer = document.createElement('div')
+  contentContainer.style.cssText = `
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `
+  contentContainer.appendChild(maskIcon)
+  contentContainer.appendChild(plusOneText)
+  maskCollectAnimation.appendChild(contentContainer)
+  
+  // Add CSS animation keyframes
+  const style = document.createElement('style')
+  style.textContent = `
+    @keyframes maskBounce {
+      0% { transform: scale(0) rotate(-180deg); opacity: 0; }
+      50% { transform: scale(1.2) rotate(10deg); }
+      70% { transform: scale(0.9) rotate(-5deg); }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
+    @keyframes plusOnePop {
+      0% { transform: scale(0) translateY(50px); opacity: 0; }
+      50% { transform: scale(1.5) translateY(-20px); }
+      100% { transform: scale(1) translateY(0); opacity: 1; }
+    @keyframes textGlow {
+      0% { text-shadow: 0 0 10px #00ff00; }
+      50% { text-shadow: 0 0 30px #00ff00, 0 0 60px #00ff00; }
+      100% { text-shadow: 0 0 10px #00ff00; }
+    }
+  `
+  document.head.appendChild(style)
+  root.appendChild(maskCollectAnimation)
+  
+  // Create SECOND MASK animation for Level 2 completion
+  const secondMaskAnimation = document.createElement('div')
+  secondMaskAnimation.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 1500;
+    background: transparent;
+  `
+  
+  // "Second Mask Acquired" title
+  const secondMaskTitle = document.createElement('div')
+  secondMaskTitle.style.cssText = `
+    font-size: 52px;
+    font-weight: bold;
+    color: #ffffff;
+    margin-bottom: 30px;
+    animation: textGlow 1s ease-in-out infinite;
+    text-shadow: 0 0 20px #00ff00;
+    font-family: Arial, sans-serif;
+  `
+  secondMaskTitle.textContent = 'Second Mask Acquired'
+  
+  // Big mask icon
+  const secondMaskIcon = document.createElement('div')
+  secondMaskIcon.style.cssText = `
+    width: 160px;
+    height: 160px;
+    background-image: url('/sprites/worlditems.png');
+    background-size: 320px 320px;
+    background-position: 0px 0px;
+    image-rendering: pixelated;
+    animation: maskBounce 0.8s ease-out;
+    margin-bottom: 20px;
+  `
+  
+  // "+1 Mask Acquired" text
+  const acquiredText = document.createElement('div')
+  acquiredText.style.cssText = `
+    font-size: 36px;
+    font-weight: bold;
+    color: #00ff00;
+    animation: plusOnePop 0.6s ease-out 0.5s both;
+    text-shadow: 0 0 20px #00ff00;
+    font-family: Arial, sans-serif;
+  `
+  acquiredText.textContent = '+1 Mask Acquired'
+  
+  secondMaskAnimation.appendChild(secondMaskTitle)
+  secondMaskAnimation.appendChild(secondMaskIcon)
+  secondMaskAnimation.appendChild(acquiredText)
+  root.appendChild(secondMaskAnimation)
+  
   const spawnWorldItem0 = (worldPos: THREE.Vector3, sourceHalfHeight: number): void => {
-    if (inventory.has(item0Id)) return
-    if (hasWorldItemInWorld(item0Id)) return
+    console.log('spawnWorldItem0 called at position:', worldPos)
+    if (inventory.has(item0Id)) {
+      console.log('Cannot spawn mask: already in inventory')
+      return
+    }
+    if (hasWorldItemInWorld(item0Id)) {
+      console.log('Cannot spawn mask: already in world')
+      return
+    }
 
     const dropPos = worldPos.clone()
     dropPos.y = worldPos.y - sourceHalfHeight + 1
@@ -278,10 +504,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     projectileDir.normalize()
     projectileRight.crossVectors(projectileDir, up).normalize()
 
+    // Spawn from bottom right area (where hand is visible)
     projectileSpawnPos.copy(camera.position)
-    projectileSpawnPos.addScaledVector(projectileDir, 0.75)
-    projectileSpawnPos.addScaledVector(projectileRight, 0.18)
-    projectileSpawnPos.addScaledVector(up, -0.16)
+    projectileSpawnPos.addScaledVector(projectileDir, 0.5)
+    projectileSpawnPos.addScaledVector(projectileRight, 0.4) // More to the right
+    projectileSpawnPos.addScaledVector(up, -0.3) // Lower position
 
     const projectileVelocity = new THREE.Vector3()
       .copy(projectileDir)
@@ -295,7 +522,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       frameCount: 4,
       framesPerRow: 2,
       fps: 18,
-      size: 1.25,
+      size: 2.5, // Start bigger
       billboard: 'upright',
       alphaTest: 0.35,
       gravity: 0,
@@ -304,7 +531,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       collisionRadius: 0.16,
       collideWithWorld: true,
       bounceRestitution: 0.9,
-      maxBounces: 4,
+      maxBounces: 10,
+      startSize: 2.5,
+      targetSize: 1.25,
+      sizeTransitionDuration: 0.15,
+      // Custom property for size transition
     })
 
     scene.add(p.mesh)
@@ -335,30 +566,55 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const isOverlayRotateHeld = () => rightMouseDown || zDown
 
   const removeNextDoor = () => {
-    if (!mapRoot || nextDoorIndex > 5) return
+    if (!mapRoot) {
+      console.warn('Cannot remove door: map not loaded yet')
+      return
+    }
+    
+    if (nextDoorIndex > 5) {
+      console.log('All doors already opened')
+      return
+    }
     
     const doorName = `Door${nextDoorIndex}`
     let doorFound = false
     
-    mapRoot.traverse((child) => {
-      if (doorFound) return
-      if (child.name === doorName) {
-        // Remove from collision meshes
-        child.traverse((descendant) => {
-          if ((descendant as THREE.Mesh).isMesh) {
-            const mesh = descendant as THREE.Mesh
-            const index = collisionMeshes.indexOf(mesh)
-            if (index > -1) {
-              collisionMeshes.splice(index, 1)
-            }
+    console.log(`Attempting to remove door: ${doorName}`)
+    
+    try {
+      mapRoot.traverse((child) => {
+        if (doorFound) return
+        if (!child) return // Safety check
+        if (child.name === doorName) {
+          console.log(`Found and removing door: ${doorName}`)
+          // Remove from collision meshes
+          if (child.traverse) {
+            child.traverse((descendant) => {
+              if ((descendant as THREE.Mesh).isMesh) {
+                const mesh = descendant as THREE.Mesh
+                const index = collisionMeshes.indexOf(mesh)
+                if (index > -1) {
+                  collisionMeshes.splice(index, 1)
+                }
+              }
+            })
           }
-        })
-        // Remove from scene
-        child.parent?.remove(child)
-        doorFound = true
-        nextDoorIndex++
-      }
-    })
+          // Remove from scene
+          if (child.parent) {
+            child.parent.remove(child)
+          }
+          doorFound = true
+          nextDoorIndex++
+          console.log(`Door ${doorName} removed successfully. Next door index: ${nextDoorIndex}`)
+        }
+      })
+    } catch (e) {
+      console.error('Error during door removal:', e)
+    }
+    
+    if (!doorFound) {
+      console.warn(`Door ${doorName} not found in map`)
+    }
   }
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -447,6 +703,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   }
 
   const onMouseDown = (event: MouseEvent) => {
+    // Only allow shooting when game has started (controls locked)
+    if (!controls.isLocked) return
+    
     if (event.button === 0) {
       handViewModel.triggerThrow()
       spawnKnifeProjectile()
@@ -466,11 +725,32 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     event.preventDefault()
   }
 
-  // Auto-lock on click
-  const autoLock = () => {
+  // Create start button instead of auto-lock
+  const startButton = document.createElement('button')
+  startButton.textContent = 'START GAME'
+  startButton.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 20px 40px;
+    font-size: 24px;
+    font-weight: bold;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    z-index: 2000;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+  `
+  startButton.addEventListener('click', (e) => {
+    e.stopPropagation() // Prevent knife throw
+    e.preventDefault()
     controls.lock()
-  }
-  document.addEventListener('click', autoLock)
+    startButton.remove()
+  })
+  root.appendChild(startButton)
 
   const onResize = () => {
     const w = Math.max(1, window.innerWidth)
@@ -750,24 +1030,88 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       playerMs = performance.now() - playerStart
     }
 
+    // Update game loop
+    gameLoop.update(dt, player.position)
+    
+    // Update fade overlay
+    fadeOverlay.style.opacity = gameLoop.fadeAlpha.toString()
+    
+    // Show/hide mask collection animation
+    if (gameLoop.phase === 'restarting') {
+      // Level 2 shows "Second Mask Acquired" animation
+      if (gameLoop.currentLevel === 1) {
+        secondMaskAnimation.style.display = 'flex'
+        maskCollectAnimation.style.display = 'none'
+      } else {
+        // Level 1 and others show normal mask animation
+        maskCollectAnimation.style.display = 'flex'
+        secondMaskAnimation.style.display = 'none'
+      }
+    } else {
+      maskCollectAnimation.style.display = 'none'
+      secondMaskAnimation.style.display = 'none'
+    }
+    
     // Always update enemy physics
     const enemyStart = performance.now()
     for (const e of enemies) {
+      // Check if enemy should be paused (waiting for player movement)
+      const shouldPause = gameLoop.shouldEnemyWait()
+      
       e.update({
         dt,
         camera,
-        playerPosition: player.position,
+        playerPosition: shouldPause ? e.mesh.position : player.position, // Don't pursue if paused
         collisionMeshes,
       })
 
       if (e.consumeExplosionEvent()) {
         spawnExplosion(e.mesh.position)
 
+        // Normal logic: type 0 enemies drop masks
         if (e.type === 0) {
           spawnWorldItem0(e.mesh.position, e.halfHeight)
         }
       }
     }
+    
+    // Update tank attack meshes in masked enemy scene
+    // First remove any attack meshes that are no longer active
+    const meshesToRemove: THREE.Object3D[] = []
+    maskedEnemyScene.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh
+        let isActive = false
+        for (const e of enemies) {
+          for (const attack of e.attacks) {
+            if (attack.meshes.includes(mesh)) {
+              isActive = true
+              break
+            }
+          }
+          if (isActive) break
+        }
+        if (!isActive && !enemies.some(e => e.mesh === mesh)) {
+          meshesToRemove.push(child)
+        }
+      }
+    })
+    
+    for (const mesh of meshesToRemove) {
+      maskedEnemyScene.remove(mesh)
+    }
+    
+    // Add active attack meshes
+    for (const e of enemies) {
+      for (const attack of e.attacks) {
+        for (const mesh of attack.meshes) {
+          if (!maskedEnemyScene.children.includes(mesh)) {
+            maskedEnemyScene.add(mesh)
+          }
+        }
+      }
+    }
+    
     const enemyMs = performance.now() - enemyStart
 
     for (const wi of groundItems) {
@@ -788,10 +1132,27 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
       inventory.add(wi.id)
       if (wi.id === item0Id) {
+        console.log('MASK PICKED UP! Triggering level transition...')
         baseOverlayWorld.setMask0Enabled(true)
+        // Trigger level completion when mask is picked up
+        gameLoop.triggerMaskPickup()
+        console.log('triggerMaskPickup called, phase should now be fade-out')
+        
+        // Play ding sound
+        const audio = new Audio('/sounds/ding.mp3')
+        audio.volume = 0.5
+        audio.play().catch(() => {})
       }
       if (wi.id === item1Id) {
         baseOverlayWorld.setMask1Enabled(true)
+        // Also trigger level completion for item1 (from type 1 enemies)
+        console.log('ITEM 1 PICKED UP! Triggering level transition...')
+        gameLoop.triggerMaskPickup()
+        
+        // Play ding sound
+        const audio = new Audio('/sounds/ding.mp3')
+        audio.volume = 0.5
+        audio.play().catch(() => {})
       }
 
       scene.remove(wi.gi.mesh)
@@ -963,6 +1324,36 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       })
     }
   }
+  
+  // Setup GameLoop callbacks
+  gameLoop.onEnemyDefeated = () => {
+    // Enemy already drops mask via spawnWorldItem0, no extra action needed
+  }
+  
+  gameLoop.onMaskPickup = () => {
+    // Don't unlock controls - keep them locked during transition
+    // The animation overlay shows while game continues running
+  }
+  
+  gameLoop.onFadeComplete = () => {
+    console.log('=== LEVEL TRANSITION START ===')
+    console.log('Clearing level...')
+    clearLevel()
+    console.log('Opening door...')
+    removeNextDoor() // Open the next door
+    console.log('Starting next level...')
+    gameLoop.startNextLevel()
+    console.log('Resetting player...')
+    resetPlayer()
+    console.log('Spawning new enemies...')
+    spawnLevelEnemy()
+    console.log('=== LEVEL TRANSITION COMPLETE ===')
+    console.log('Current level:', gameLoop.currentLevel)
+  }
+  
+  // Spawn first level
+  spawnLevelEnemy()
+  
   animate()
 
   document.addEventListener('keydown', onKeyDown)
@@ -982,7 +1373,6 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     document.removeEventListener('mousedown', onMouseDown)
     document.removeEventListener('mouseup', onMouseUp)
     document.removeEventListener('contextmenu', onContextMenu)
-    document.removeEventListener('click', autoLock)
 
     for (const geometry of collisionGeometries) {
       disposeBoundsTreeIfPresent(geometry)

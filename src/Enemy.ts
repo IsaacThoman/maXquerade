@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 import { initThreeMeshBVH, setRaycasterFirstHitOnly } from './bvh'
+import { TankAttack } from './TankAttack'
+import {Vector3} from "three";
 
 export type EnemyState = 'idle' | 'pursuing' | 'dying' | 'dead'
 
@@ -19,6 +21,8 @@ export class Enemy {
   private ctx: CanvasRenderingContext2D
   private texture: THREE.CanvasTexture
   private time: number = 0
+  private lastAttackTime: number = 0
+  attacks: TankAttack[] = []
 
   private spriteSheet: HTMLImageElement
   private spriteReady = false
@@ -57,6 +61,10 @@ export class Enemy {
 
   // State
   state: EnemyState = 'idle'
+  isAttacking = false
+  attackStartTime = 0
+  attackPreparationTime = 0.8 // Time to stand still before shooting
+  attackDuration = 1.5 // Total attack time
 
   alive = true
 
@@ -80,7 +88,7 @@ export class Enemy {
     new THREE.Vector3(-0.707, 0, -0.707),
   ]
 
-  constructor(position: THREE.Vector3, state: EnemyState = 'idle', type: EnemyType = 0) {
+  constructor(position: Vector3, state: EnemyState = 'idle', type: EnemyType = 0) {
     initThreeMeshBVH()
 
     this.type = type
@@ -185,19 +193,12 @@ export class Enemy {
     this.velocity.set(0, 0, 0)
     this.pursuitAnimTime = 0
 
-    if (this.type === 0) {
-      this.state = 'dying'
-      this.deathAnimTime = 0
-      this.hideOnNextUpdate = false
-      this.spawnExplosionEvent = false
-      this.lastDrawnFrame = -1
-      return
-    }
-
-    // Other enemy types: disappear for now.
-    this.state = 'dead'
-
-    this.mesh.visible = false
+    // All enemy types now play death animation
+    this.state = 'dying'
+    this.deathAnimTime = 0
+    this.hideOnNextUpdate = false
+    this.spawnExplosionEvent = false
+    this.lastDrawnFrame = -1
   }
 
   consumeExplosionEvent(): boolean {
@@ -290,13 +291,23 @@ export class Enemy {
       }
     }
 
+// Calculate distance to player for state transitions
+    this.toPlayer.set(playerPosition.x - pos.x, 0, playerPosition.z - pos.z)
+    const distance = this.toPlayer.length()
+
+    // State transitions
+    if (this.state === 'idle' && distance < 15.0) {
+      // Start pursuing when player is within detection range
+      this.state = 'pursuing'
+    } else if (this.state === 'pursuing' && distance > 25.0) {
+      // Stop pursuing when player is too far away
+      this.state = 'idle'
+    }
+
     // State-based behavior
     if (this.state === 'pursuing' && this.alive) {
       this.pursuitAnimTime += dt
-      // Move towards player
-      this.toPlayer.set(playerPosition.x - pos.x, 0, playerPosition.z - pos.z)
-      const distance = this.toPlayer.length()
-
+      
       if (distance > 1.5) {
         // Don't get too close
         this.toPlayer.normalize()
@@ -364,6 +375,57 @@ export class Enemy {
       this.grounded = true
     }
 
+    // Tank attack logic
+    if (this.type === 1) {
+      // Check if tank should attack (when pursuing and close enough)
+      if (this.state === 'pursuing' && !this.isAttacking) {
+        const attackDistance = this.toPlayer.length()
+        if (attackDistance < 8.0) { // Attack range
+          // Attack every 2 seconds, but track last attack time
+          if (!this.lastAttackTime) this.lastAttackTime = 0
+          if (this.time - this.lastAttackTime > 2.0) {
+            this.isAttacking = true
+            this.attackStartTime = this.time
+            this.lastAttackTime = this.time
+          }
+        }
+      }
+      
+      // Handle attacking state
+      if (this.isAttacking) {
+        const attackElapsed = this.time - this.attackStartTime
+        
+        // Stand still during preparation and shooting
+        this.velocity.x = 0
+        this.velocity.z = 0
+        
+        // Shoot laser after preparation
+        if (attackElapsed >= this.attackPreparationTime && this.attacks.length === 0) {
+          const attack = new TankAttack(
+            pos.clone(),
+            playerPosition.clone(),
+            collisionMeshes
+          )
+          this.attacks.push(attack)
+        }
+        
+        // End attack after duration
+        if (attackElapsed >= this.attackDuration) {
+          this.isAttacking = false
+        }
+      }
+      
+      // Update existing attacks
+      for (let i = this.attacks.length - 1; i >= 0; i--) {
+        const attack = this.attacks[i]
+        attack.update({ dt, camera })
+        if (!attack.alive) {
+          attack.dispose()
+          this.attacks.splice(i, 1)
+        }
+      }
+    }
+
     // Billboard: face the camera but stay perpendicular to ground
     this.cameraPos.copy(camera.position)
     this.cameraPos.y = pos.y // Lock to same Y level
@@ -402,5 +464,10 @@ export class Enemy {
     this.texture.dispose()
     ;(this.mesh.material as THREE.Material).dispose()
     this.mesh.geometry.dispose()
+    
+    // Dispose of all attacks
+    for (const attack of this.attacks) {
+      attack.dispose()
+    }
   }
 }
