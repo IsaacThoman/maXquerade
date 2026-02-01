@@ -11,8 +11,10 @@ export class BaseOverlayWorld {
   readonly scene: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
 
-  private enabled = false
+  private mask0Enabled = false
+  private mask1Enabled = false
 
+  // Mask 0 (item 0)
   private planeGeometry: THREE.PlaneGeometry
   private planeMaterial: THREE.MeshBasicMaterial
   private plane: THREE.Mesh
@@ -22,7 +24,10 @@ export class BaseOverlayWorld {
   private ctx: CanvasRenderingContext2D | null = null
   private anim: SpriteSheet | null = null
 
-  // Alpha mask for enemy visibility (eye holes)
+  private mask0AnimX = 0
+  private mask0AnimY = 0
+
+  // Alpha mask for enemy visibility (eye holes) - mask 0
   readonly alphaMaskScene: THREE.Scene
   readonly alphaMaskCamera: THREE.PerspectiveCamera
   private alphaMaskPlane: THREE.Mesh
@@ -33,16 +38,36 @@ export class BaseOverlayWorld {
   private alphaMaskCtx: CanvasRenderingContext2D | null = null
   private alphaMaskAnim: SpriteSheet | null = null
 
-  private animX = 0
-  private animY = 0
+  // Mask 1 (item 1)
+  private plane1Geometry: THREE.PlaneGeometry
+  private plane1Material: THREE.MeshBasicMaterial
+  private plane1: THREE.Mesh
+  private texture1: THREE.CanvasTexture | null = null
+  private canvas1: HTMLCanvasElement | null = null
+  private ctx1: CanvasRenderingContext2D | null = null
+  private anim1: SpriteSheet | null = null
+  private mask1AnimX = 0
+  private mask1AnimY = 0
+
+  // Alpha mask - mask 1
+  private alphaMaskPlane1: THREE.Mesh
+  private alphaMaskGeometry1: THREE.PlaneGeometry
+  private alphaMaskMaterial1: THREE.MeshBasicMaterial
+  private alphaMaskTexture1: THREE.CanvasTexture | null = null
+  private alphaMaskCanvas1: HTMLCanvasElement | null = null
+  private alphaMaskCtx1: CanvasRenderingContext2D | null = null
+  private alphaMaskAnim1: SpriteSheet | null = null
+
   private animScale = 1
-  private animFrame = 0
-  private animTimer = 0
+  private mask0Frame = 0
+  private mask0Timer = 0
+  private mask1Frame = 0
+  private mask1Timer = 0
   private readonly animFps = 14
 
   private euler = new THREE.Euler(0, 0, 0, 'YXZ')
   private yaw = 0
-  private pitch = -Math.PI * 0.5
+  private pitch = -Math.PI * 0.45
   private readonly minPitch = -Math.PI * 0.49
   private readonly maxPitch = THREE.MathUtils.degToRad(20)
   private disposed = false
@@ -81,6 +106,17 @@ export class BaseOverlayWorld {
     this.plane.visible = false
     this.scene.add(this.plane)
 
+    this.plane1Geometry = new THREE.PlaneGeometry(1, 1)
+    this.plane1Material = new THREE.MeshBasicMaterial({
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthTest: false,
+      depthWrite: false,
+    })
+    this.plane1 = new THREE.Mesh(this.plane1Geometry, this.plane1Material)
+    this.plane1.visible = false
+    this.scene.add(this.plane1)
+
     // Alpha mask scene (for stencil-based enemy visibility through eye holes)
     this.alphaMaskScene = new THREE.Scene()
     this.alphaMaskCamera = new THREE.PerspectiveCamera(90, aspect, 0.1, 50)
@@ -98,34 +134,79 @@ export class BaseOverlayWorld {
     this.alphaMaskPlane.visible = false
     this.alphaMaskScene.add(this.alphaMaskPlane)
 
+    this.alphaMaskGeometry1 = new THREE.PlaneGeometry(1, 1)
+    this.alphaMaskMaterial1 = new THREE.MeshBasicMaterial({
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthTest: false,
+      depthWrite: false,
+      alphaTest: 0.5,
+    })
+    this.alphaMaskPlane1 = new THREE.Mesh(this.alphaMaskGeometry1, this.alphaMaskMaterial1)
+    this.alphaMaskPlane1.visible = false
+    this.alphaMaskScene.add(this.alphaMaskPlane1)
+
+    this.positionSecondaryMaskPlanes()
     this.updateCamera()
     this.loadAssets(animImageSrc, alphaMaskSrc)
+    this.loadAssetsMask1('/sprites/mask1.png', '/sprites/mask1_alpha.png')
   }
 
   get isEnabled(): boolean {
-    return this.enabled
+    return this.mask0Enabled || this.mask1Enabled
   }
 
   setEnabled(enabled: boolean): void {
-    this.enabled = enabled
-    this.plane.visible = enabled
-    this.alphaMaskPlane.visible = enabled
+    this.setMask0Enabled(enabled)
+  }
+
+  setMask0Enabled(enabled: boolean): void {
+    this.mask0Enabled = enabled
+    this.updateVisibility()
+  }
+
+  setMask1Enabled(enabled: boolean): void {
+    this.mask1Enabled = enabled
+    this.updateVisibility()
   }
 
   update(dt: number, aimAssistActive = false): void {
-    const isLookingAtCanvas = aimAssistActive ? this.applyAimAssist(dt) : false
-    if (!this.canvas || !this.ctx || !this.anim || !this.texture) return
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-    const targetFrame = isLookingAtCanvas ? this.anim.frameCount - 1 : 0
-    this.updateAnimFrame(dt, targetFrame)
-    this.anim.drawFrame(this.ctx, this.animFrame, this.animX, this.animY, this.animScale)
-    this.texture.needsUpdate = true
+    const aimed = aimAssistActive ? this.applyAimAssist(dt) : null
 
-    // Update alpha mask in sync with main mask
+    const mask0Last = Math.max(0, (this.anim?.frameCount ?? 1) - 1)
+    const mask1Last = Math.max(0, (this.anim1?.frameCount ?? 1) - 1)
+
+    const targetMask0 = this.mask0Enabled && aimed === 'mask0' ? mask0Last : 0
+    const targetMask1 = this.mask1Enabled && aimed === 'mask1' ? mask1Last : 0
+
+    const r0 = this.updateAnimFrame(dt, this.mask0Frame, this.mask0Timer, targetMask0)
+    this.mask0Frame = r0.frame
+    this.mask0Timer = r0.timer
+
+    const r1 = this.updateAnimFrame(dt, this.mask1Frame, this.mask1Timer, targetMask1)
+    this.mask1Frame = r1.frame
+    this.mask1Timer = r1.timer
+
+    if (this.canvas && this.ctx && this.anim && this.texture) {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+      this.anim.drawFrame(this.ctx, this.mask0Frame, this.mask0AnimX, this.mask0AnimY, this.animScale)
+      this.texture.needsUpdate = true
+    }
     if (this.alphaMaskCanvas && this.alphaMaskCtx && this.alphaMaskAnim && this.alphaMaskTexture) {
       this.alphaMaskCtx.clearRect(0, 0, this.alphaMaskCanvas.width, this.alphaMaskCanvas.height)
-      this.alphaMaskAnim.drawFrame(this.alphaMaskCtx, this.animFrame, this.animX, this.animY, this.animScale)
+      this.alphaMaskAnim.drawFrame(this.alphaMaskCtx, this.mask0Frame, this.mask0AnimX, this.mask0AnimY, this.animScale)
       this.alphaMaskTexture.needsUpdate = true
+    }
+
+    if (this.canvas1 && this.ctx1 && this.anim1 && this.texture1) {
+      this.ctx1.clearRect(0, 0, this.canvas1.width, this.canvas1.height)
+      this.anim1.drawFrame(this.ctx1, this.mask1Frame, this.mask1AnimX, this.mask1AnimY, this.animScale)
+      this.texture1.needsUpdate = true
+    }
+    if (this.alphaMaskCanvas1 && this.alphaMaskCtx1 && this.alphaMaskAnim1 && this.alphaMaskTexture1) {
+      this.alphaMaskCtx1.clearRect(0, 0, this.alphaMaskCanvas1.width, this.alphaMaskCanvas1.height)
+      this.alphaMaskAnim1.drawFrame(this.alphaMaskCtx1, this.mask1Frame, this.mask1AnimX, this.mask1AnimY, this.animScale)
+      this.alphaMaskTexture1.needsUpdate = true
     }
   }
 
@@ -159,6 +240,13 @@ export class BaseOverlayWorld {
     this.alphaMaskTexture?.dispose()
     this.alphaMaskMaterial.dispose()
     this.alphaMaskGeometry.dispose()
+
+    this.texture1?.dispose()
+    this.plane1Material.dispose()
+    this.plane1Geometry.dispose()
+    this.alphaMaskTexture1?.dispose()
+    this.alphaMaskMaterial1.dispose()
+    this.alphaMaskGeometry1.dispose()
   }
 
   private updateCamera(): void {
@@ -168,9 +256,9 @@ export class BaseOverlayWorld {
     this.alphaMaskCamera.quaternion.setFromEuler(this.euler)
   }
 
-  private applyAimAssist(dt: number): boolean {
+  private applyAimAssist(dt: number): 'mask0' | 'mask1' | null {
     this.collectCanvasTargets()
-    if (this.aimAssistTargets.length === 0) return false
+    if (this.aimAssistTargets.length === 0) return null
 
     this.camera.getWorldPosition(this.aimAssistCameraPos)
     this.camera.getWorldDirection(this.aimAssistForward)
@@ -178,19 +266,21 @@ export class BaseOverlayWorld {
     this.aimAssistRaycaster.set(this.aimAssistCameraPos, this.aimAssistForward)
     this.aimAssistRayHits.length = 0
     const hits = this.aimAssistRaycaster.intersectObjects(this.aimAssistTargets, false, this.aimAssistRayHits)
-    if (hits.length === 0) return false
+    if (hits.length === 0) return null
 
     const hitObject = hits[0].object
-    if (!hitObject.visible) return false
+    if (!hitObject.visible) return null
+
+    const aimed = hitObject === this.plane ? 'mask0' : hitObject === this.plane1 ? 'mask1' : null
 
     hitObject.getWorldPosition(this.aimAssistTargetPos)
     this.aimAssistDir.subVectors(this.aimAssistTargetPos, this.aimAssistCameraPos)
-    if (this.aimAssistDir.lengthSq() <= 0) return false
+    if (this.aimAssistDir.lengthSq() <= 0) return aimed
     this.aimAssistDir.normalize()
 
     const dot = this.aimAssistForward.dot(this.aimAssistDir)
     const angle = Math.acos(THREE.MathUtils.clamp(dot, -1, 1))
-    if (angle > this.aimAssistMaxAngle) return false
+    if (angle > this.aimAssistMaxAngle) return aimed
 
     this.aimAssistBestDir.copy(this.aimAssistDir)
 
@@ -204,23 +294,30 @@ export class BaseOverlayWorld {
     this.pitch = THREE.MathUtils.clamp(this.lerpAngle(this.pitch, targetPitch, t), this.minPitch, this.maxPitch)
     this.yaw = this.lerpAngle(this.yaw, targetYaw, t)
     this.updateCamera()
-    return true
+    return aimed
   }
 
-  private updateAnimFrame(dt: number, targetFrame: number): void {
-    if (this.animFps <= 0 || this.animFrame === targetFrame) return
+  private updateAnimFrame(
+    dt: number,
+    currentFrame: number,
+    currentTimer: number,
+    targetFrame: number,
+  ): { frame: number; timer: number } {
+    if (this.animFps <= 0 || currentFrame === targetFrame) return { frame: currentFrame, timer: currentTimer }
     const frameDuration = 1 / this.animFps
-    this.animTimer += dt
-    while (this.animTimer >= frameDuration) {
-      this.animTimer -= frameDuration
-      if (this.animFrame < targetFrame) {
-        this.animFrame += 1
-      } else if (this.animFrame > targetFrame) {
-        this.animFrame -= 1
+    let timer = currentTimer + dt
+    let frame = currentFrame
+    while (timer >= frameDuration) {
+      timer -= frameDuration
+      if (frame < targetFrame) {
+        frame += 1
+      } else if (frame > targetFrame) {
+        frame -= 1
       } else {
         break
       }
     }
+    return { frame, timer }
   }
 
   private collectCanvasTargets(): void {
@@ -293,8 +390,8 @@ export class BaseOverlayWorld {
           framesPerRow,
         })
 
-        this.animX = Math.floor((this.canvas.width - this.anim.frameWidth * this.animScale) / 2)
-        this.animY = Math.floor((this.canvas.height - this.anim.frameHeight * this.animScale) / 2)
+        this.mask0AnimX = Math.floor((this.canvas.width - this.anim.frameWidth * this.animScale) / 2)
+        this.mask0AnimY = Math.floor((this.canvas.height - this.anim.frameHeight * this.animScale) / 2)
 
         // Setup alpha mask canvas and texture (same dimensions as main)
         this.alphaMaskCanvas = document.createElement('canvas')
@@ -323,6 +420,107 @@ export class BaseOverlayWorld {
       .catch((error) => {
         console.error(error)
       })
+  }
+
+  private loadAssetsMask1(animImageSrc: string, alphaMaskSrc: string): void {
+    Promise.all([this.loadImage(animImageSrc), this.loadImage(alphaMaskSrc)])
+      .then(([animImage, alphaMaskImage]) => {
+        if (this.disposed) return
+
+        const frameCount = 4
+        const framesPerRow = 1
+        const frameWidth = Math.max(1, Math.floor(animImage.width / framesPerRow))
+        const frameHeight = Math.max(1, Math.floor(animImage.height / frameCount))
+        if (animImage.height % frameCount !== 0) {
+          console.warn(
+            `[BaseOverlayWorld:mask1] animImage height (${animImage.height}) not divisible by frameCount (${frameCount}); using frameHeight=${frameHeight}`,
+          )
+        }
+        if (alphaMaskImage.width !== animImage.width || alphaMaskImage.height !== animImage.height) {
+          console.warn(
+            `[BaseOverlayWorld:mask1] alphaMaskImage size (${alphaMaskImage.width}x${alphaMaskImage.height}) differs from animImage size (${animImage.width}x${animImage.height})`,
+          )
+        }
+
+        this.canvas1 = document.createElement('canvas')
+        this.canvas1.width = frameWidth
+        this.canvas1.height = frameHeight
+        this.ctx1 = this.canvas1.getContext('2d')
+        if (!this.ctx1) return
+        this.ctx1.imageSmoothingEnabled = false
+
+        this.texture1 = new THREE.CanvasTexture(this.canvas1)
+        this.texture1.magFilter = THREE.NearestFilter
+        this.texture1.minFilter = THREE.NearestFilter
+        this.texture1.generateMipmaps = false
+
+        this.plane1Material.map = this.texture1
+        this.plane1Material.needsUpdate = true
+
+        const aspect = this.canvas1.width / this.canvas1.height
+        this.plane1.scale.set(aspect, 1, 1)
+
+        this.anim1 = new SpriteSheet(animImage, frameWidth, frameHeight, {
+          frameCount,
+          framesPerRow,
+        })
+
+        this.mask1AnimX = Math.floor((this.canvas1.width - this.anim1.frameWidth * this.animScale) / 2)
+        this.mask1AnimY = Math.floor((this.canvas1.height - this.anim1.frameHeight * this.animScale) / 2)
+
+        this.alphaMaskCanvas1 = document.createElement('canvas')
+        this.alphaMaskCanvas1.width = this.canvas1.width
+        this.alphaMaskCanvas1.height = this.canvas1.height
+        this.alphaMaskCtx1 = this.alphaMaskCanvas1.getContext('2d')
+        if (!this.alphaMaskCtx1) return
+        this.alphaMaskCtx1.imageSmoothingEnabled = false
+
+        this.alphaMaskTexture1 = new THREE.CanvasTexture(this.alphaMaskCanvas1)
+        this.alphaMaskTexture1.magFilter = THREE.NearestFilter
+        this.alphaMaskTexture1.minFilter = THREE.NearestFilter
+        this.alphaMaskTexture1.generateMipmaps = false
+
+        this.alphaMaskMaterial1.map = this.alphaMaskTexture1
+        this.alphaMaskMaterial1.needsUpdate = true
+        this.alphaMaskPlane1.scale.set(aspect, 1, 1)
+
+        this.alphaMaskAnim1 = new SpriteSheet(alphaMaskImage, frameWidth, frameHeight, {
+          frameCount,
+          framesPerRow,
+        })
+
+        this.update(0)
+      })
+      .catch((error) => {
+        console.error(error)
+      })
+  }
+
+  private updateVisibility(): void {
+    this.plane.visible = this.mask0Enabled
+    this.alphaMaskPlane.visible = this.mask0Enabled
+    this.plane1.visible = this.mask1Enabled
+    this.alphaMaskPlane1.visible = this.mask1Enabled
+  }
+
+  private positionSecondaryMaskPlanes(): void {
+    // Match distance to the primary plane, but rotate 90 degrees around the camera (yaw).
+    const camPos = this.camera.position
+    const v0 = new THREE.Vector3().subVectors(this.plane.position, camPos) // camera -> plane0
+    const v1 = v0
+      .clone()
+      .applyAxisAngle(new THREE.Vector3(0, 1, 0), -THREE.MathUtils.degToRad(115)) // camera-right-ish
+
+    this.plane1.position.copy(camPos).add(v1)
+
+    const toCam = new THREE.Vector3().subVectors(camPos, this.plane1.position)
+    if (toCam.lengthSq() > 0) {
+      toCam.normalize()
+      this.plane1.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), toCam)
+    }
+
+    this.alphaMaskPlane1.position.copy(this.plane1.position)
+    this.alphaMaskPlane1.quaternion.copy(this.plane1.quaternion)
   }
 
   private loadImage(src: string): Promise<HTMLImageElement> {
