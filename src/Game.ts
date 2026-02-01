@@ -106,7 +106,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   // Type 0: always visible
   // Type 1: only visible through mask alpha
   const enemies: Enemy[] = [
-    new Enemy(new THREE.Vector3(0, 5.0, -20), 'idle', 0),
+    new Enemy(new THREE.Vector3(2, 5.0, -20), 'idle', 0),
     new Enemy(new THREE.Vector3(-3, 5.0, -15), 'idle', 1),
   ]
 
@@ -122,7 +122,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       framesPerRow: 17,
       fps: 24,
       size: 10.0,
-      billboard: 'full',
+      billboard: 'upright',
       alphaTest: 0.05,
       gravity: 0,
       drag: 0,
