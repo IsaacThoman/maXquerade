@@ -727,29 +727,49 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   // Create start button instead of auto-lock
   const startButton = document.createElement('button')
-  startButton.textContent = 'START GAME'
+  startButton.textContent = 'Click to Play'
   startButton.style.cssText = `
     position: fixed;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    padding: 20px 40px;
-    font-size: 24px;
-    font-weight: bold;
-    background: #4CAF50;
+    padding: 16px 32px;
+    font-size: 18px;
+    background: #555;
     color: white;
     border: none;
-    border-radius: 8px;
+    border-radius: 4px;
     cursor: pointer;
     z-index: 2000;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
   `
+  
+  const showStartButton = () => {
+    if (!root.contains(startButton)) {
+      root.appendChild(startButton)
+    }
+  }
+  
+  const hideStartButton = () => {
+    if (root.contains(startButton)) {
+      startButton.remove()
+    }
+  }
+  
   startButton.addEventListener('click', (e) => {
     e.stopPropagation() // Prevent knife throw
     e.preventDefault()
     controls.lock()
-    startButton.remove()
   })
+  
+  // Handle pointer lock state changes
+  controls.addEventListener('lock', () => {
+    hideStartButton()
+  })
+  
+  controls.addEventListener('unlock', () => {
+    showStartButton()
+  })
+  
   root.appendChild(startButton)
 
   const onResize = () => {
