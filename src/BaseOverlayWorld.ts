@@ -507,7 +507,9 @@ export class BaseOverlayWorld {
     // Match distance to the primary plane, but rotate 90 degrees around the camera (yaw).
     const camPos = this.camera.position
     const v0 = new THREE.Vector3().subVectors(this.plane.position, camPos) // camera -> plane0
-    const v1 = v0.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2) // camera-right
+    const v1 = v0
+      .clone()
+      .applyAxisAngle(new THREE.Vector3(0, 1, 0), -THREE.MathUtils.degToRad(115)) // camera-right-ish
 
     this.plane1.position.copy(camPos).add(v1)
 
