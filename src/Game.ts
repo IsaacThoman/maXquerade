@@ -22,6 +22,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   // Stats overlay
   const statsOverlay = new StatsOverlay(root, { showVelocity: true, showState: true, showFPS: true, showTimings: true })
+  statsOverlay.setVisible(false)
 
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x0b1220)
@@ -313,6 +314,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         break
       case 'KeyO':
         removeNextDoor()
+        break
+      case 'KeyP':
+        statsOverlay.toggleVisible()
         break
     }
   }
@@ -762,7 +766,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     frameProfiler.add('render.overlay', renderOverlayMs)
     frameProfiler.add('render.hand', renderHandMs)
 
-    if (controls.isLocked) {
+    if (controls.isLocked && statsOverlay.isVisible()) {
       // Update stats overlay (with rolling averages)
       statsOverlay.update({
         position: player.position,

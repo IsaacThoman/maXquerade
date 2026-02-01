@@ -38,6 +38,7 @@ export class StatsOverlay {
   private stateElement: HTMLElement | null = null
   private fpsElement: HTMLElement | null = null
   private timingElements: Partial<Record<FrameTimingKey, HTMLElement>> | null = null
+  private visible = true
 
   constructor(
     parent: HTMLElement,
@@ -84,6 +85,19 @@ export class StatsOverlay {
     }
 
     parent.appendChild(this.container)
+  }
+
+  setVisible(visible: boolean): void {
+    this.visible = visible
+    this.container.style.display = visible ? '' : 'none'
+  }
+
+  toggleVisible(): void {
+    this.setVisible(!this.visible)
+  }
+
+  isVisible(): boolean {
+    return this.visible
   }
 
   /**
