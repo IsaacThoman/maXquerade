@@ -127,6 +127,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   let sprinting = false
   let wantCrouch = false
   let rightMouseDown = false
+  let zDown = false
 
   // Physics state
   const velocity = new THREE.Vector3()
@@ -185,6 +186,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     new THREE.Vector3(-0.707, 0, -0.707),
   ]
 
+  const isOverlayRotateHeld = () => rightMouseDown || zDown
+
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.repeat) return
     switch (event.code) {
@@ -216,6 +219,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       case 'ControlLeft':
       case 'ControlRight':
         wantCrouch = true
+        break
+      case 'KeyZ':
+        zDown = true
+        frozenCameraQuat.copy(camera.quaternion)
         break
     }
   }
@@ -250,11 +257,14 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       case 'ControlRight':
         wantCrouch = false
         break
+      case 'KeyZ':
+        zDown = false
+        break
     }
   }
 
   const onMouseMove = (event: MouseEvent) => {
-    baseOverlayWorld.handleMouseMove(event, rightMouseDown)
+    baseOverlayWorld.handleMouseMove(event, isOverlayRotateHeld())
   }
 
   const onMouseDown = (event: MouseEvent) => {
@@ -378,7 +388,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       fpsUpdateTime = 0
     }
 
-    if (rightMouseDown) {
+    if (isOverlayRotateHeld()) {
       camera.quaternion.copy(frozenCameraQuat)
       camera.updateMatrixWorld()
     }
@@ -568,7 +578,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     const enemyMs = performance.now() - enemyStart
 
     const overlayStart = performance.now()
-    baseOverlayWorld.update(dt, !rightMouseDown)
+    baseOverlayWorld.update(dt, !isOverlayRotateHeld())
     const overlayMs = performance.now() - overlayStart
 
     // === MULTI-PASS RENDERING WITH STENCIL MASKING ===
