@@ -256,10 +256,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     projectileDir.normalize()
     projectileRight.crossVectors(projectileDir, up).normalize()
 
+    // Spawn from bottom right area (where hand is visible)
     projectileSpawnPos.copy(camera.position)
-    projectileSpawnPos.addScaledVector(projectileDir, 0.75)
-    projectileSpawnPos.addScaledVector(projectileRight, 0.18)
-    projectileSpawnPos.addScaledVector(up, -0.16)
+    projectileSpawnPos.addScaledVector(projectileDir, 0.5)
+    projectileSpawnPos.addScaledVector(projectileRight, 0.4) // More to the right
+    projectileSpawnPos.addScaledVector(up, -0.3) // Lower position
 
     const projectileVelocity = new THREE.Vector3()
       .copy(projectileDir)
@@ -273,7 +274,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       frameCount: 4,
       framesPerRow: 2,
       fps: 18,
-      size: 1.25,
+      size: 2.5, // Start bigger
       billboard: 'upright',
       alphaTest: 0.35,
       gravity: 0,
@@ -283,6 +284,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       collideWithWorld: true,
       bounceRestitution: 0.9,
       maxBounces: 10,
+      startSize: 2.5,
+      targetSize: 1.25,
+      sizeTransitionDuration: 0.15,
+      // Custom property for size transition
     })
 
     scene.add(p.mesh)
@@ -746,6 +751,44 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         }
       }
     }
+    
+    // Update tank attack meshes in masked enemy scene
+    // First remove any attack meshes that are no longer active
+    const meshesToRemove: THREE.Object3D[] = []
+    maskedEnemyScene.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh
+        let isActive = false
+        for (const e of enemies) {
+          for (const attack of e.attacks) {
+            if (attack.meshes.includes(mesh)) {
+              isActive = true
+              break
+            }
+          }
+          if (isActive) break
+        }
+        if (!isActive && !enemies.some(e => e.mesh === mesh)) {
+          meshesToRemove.push(child)
+        }
+      }
+    })
+    
+    for (const mesh of meshesToRemove) {
+      maskedEnemyScene.remove(mesh)
+    }
+    
+    // Add active attack meshes
+    for (const e of enemies) {
+      for (const attack of e.attacks) {
+        for (const mesh of attack.meshes) {
+          if (!maskedEnemyScene.children.includes(mesh)) {
+            maskedEnemyScene.add(mesh)
+          }
+        }
+      }
+    }
+    
     const enemyMs = performance.now() - enemyStart
 
     for (const wi of groundItems) {
