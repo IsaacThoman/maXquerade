@@ -57,8 +57,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const inventory = new Inventory()
   const item0Id = 0 as const
   const item1Id = 1 as const
+  const item2Id = 2 as const
   baseOverlayWorld.setMask0Enabled(inventory.has(item0Id))
   baseOverlayWorld.setMask1Enabled(inventory.has(item1Id))
+  baseOverlayWorld.setMask2Enabled(inventory.has(item2Id))
 
   const handViewModel = new HandViewModel({
     aspect: Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
@@ -410,6 +412,26 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
     scene.add(gi.mesh)
     groundItems.push({ id: item1Id, gi })
+  }
+
+  const spawnWorldItem2 = (worldPos: THREE.Vector3, sourceHalfHeight: number): void => {
+    if (inventory.has(item2Id)) return
+    if (hasWorldItemInWorld(item2Id)) return
+
+    const dropPos = worldPos.clone()
+    dropPos.y = worldPos.y - sourceHalfHeight + 1
+
+    const gi = new GroundItem(dropPos, {
+      ...worldItems,
+      frameIndex: 2,
+      size: 1.1,
+      bobAmplitude: 0.22,
+      bobFrequencyHz: 0.5,
+      spinSpeedRadPerSec: 1,
+    })
+
+    scene.add(gi.mesh)
+    groundItems.push({ id: item2Id, gi })
   }
 
   const spawnExplosion = (worldPos: THREE.Vector3): void => {
@@ -1321,6 +1343,17 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         audio.volume = 0.5
         audio.play().catch(() => {})
       }
+      if (wi.id === item2Id) {
+        baseOverlayWorld.setMask2Enabled(true)
+        // Also trigger level completion for item2 (from type 2 enemies)
+        console.log('ITEM 2 PICKED UP! Triggering level transition...')
+        gameLoop.triggerMaskPickup()
+        
+        // Play ding sound
+        const audio = new Audio('/sounds/ding.mp3')
+        audio.volume = 0.5
+        audio.play().catch(() => {})
+      }
 
       scene.remove(wi.gi.mesh)
       wi.gi.dispose()
@@ -1363,6 +1396,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
             if (e.type === 1) {
               spawnWorldItem1(e.mesh.position, e.halfHeight)
+            }
+            if (e.type === 2) {
+              spawnWorldItem2(e.mesh.position, e.halfHeight)
             }
 
             // Remove from appropriate scene based on type
