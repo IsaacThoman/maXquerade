@@ -127,6 +127,10 @@ export class Projectile {
     void this.loadSpriteSheet()
   }
 
+  get collisionRadius(): number {
+    return this.options.collisionRadius
+  }
+
   update({ dt, camera, collisionMeshes }: ProjectileUpdateParams): void {
     if (!this.alive) return
 

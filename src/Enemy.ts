@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { initThreeMeshBVH, setRaycasterFirstHitOnly } from './bvh'
 
-export type EnemyState = 'idle' | 'pursuing'
+export type EnemyState = 'idle' | 'pursuing' | 'dying' | 'dead'
 
 export type EnemyType = 0 | 1
 
@@ -23,6 +23,9 @@ export class Enemy {
   private spriteSheet: HTMLImageElement
   private spriteReady = false
   private pursuitAnimTime = 0
+  private deathAnimTime = 0
+  private hideOnNextUpdate = false
+  private spawnExplosionEvent = false
   private lastDrawnFrame = -1
 
   // Internal resolution
@@ -35,6 +38,11 @@ export class Enemy {
   private readonly sheetCols = 4
   private readonly pursuitFPS = 12
   private readonly pursuitFrameCount = 7
+
+  // Death animation (enemy type 0 only; stored on the 3rd row of enemy0.png)
+  private readonly deathFPS = 12
+  private readonly deathFrameCount = 5
+  private readonly deathStartFrame = this.sheetCols * 2
 
   // Physics
   private velocity = new THREE.Vector3()
@@ -49,6 +57,8 @@ export class Enemy {
 
   // State
   state: EnemyState = 'idle'
+
+  alive = true
 
   // Reusable vectors for performance
   private readonly rayOrigin = new THREE.Vector3()
@@ -147,13 +157,52 @@ export class Enemy {
     const ctx = this.ctx
     ctx.clearRect(0, 0, this.width, this.height)
 
-    const clamped = ((frameIndex % this.pursuitFrameCount) + this.pursuitFrameCount) % this.pursuitFrameCount
+    const clamped = Math.max(0, Math.floor(frameIndex))
     const sx = (clamped % this.sheetCols) * this.frameW
     const sy = Math.floor(clamped / this.sheetCols) * this.frameH
     ctx.drawImage(this.spriteSheet, sx, sy, this.frameW, this.frameH, 0, 0, this.width, this.height)
 
     this.lastDrawnFrame = frameIndex
     this.texture.needsUpdate = true
+  }
+
+  get hitRadius(): number {
+    return this.enemyRadius
+  }
+
+  get halfHeight(): number {
+    return this.enemyHeight
+  }
+
+  get isHittable(): boolean {
+    return this.alive
+  }
+
+  kill(): void {
+    if (!this.alive) return
+    this.alive = false
+
+    this.velocity.set(0, 0, 0)
+    this.pursuitAnimTime = 0
+
+    if (this.type === 0) {
+      this.state = 'dying'
+      this.deathAnimTime = 0
+      this.hideOnNextUpdate = false
+      this.spawnExplosionEvent = false
+      this.lastDrawnFrame = -1
+      return
+    }
+
+    // Other enemy types: disappear for now.
+    this.state = 'dead'
+    this.mesh.visible = false
+  }
+
+  consumeExplosionEvent(): boolean {
+    const v = this.spawnExplosionEvent
+    this.spawnExplosionEvent = false
+    return v
   }
 
   private checkGround(pos: THREE.Vector3, collisionMeshes: THREE.Mesh[]): { grounded: boolean; groundY: number } {
@@ -220,6 +269,12 @@ export class Enemy {
     const { dt, camera, playerPosition, collisionMeshes } = params
     this.time += dt
 
+    if (this.hideOnNextUpdate) {
+      this.hideOnNextUpdate = false
+      this.mesh.visible = false
+      return
+    }
+
     const pos = this.mesh.position
 
     // Ground check
@@ -235,7 +290,7 @@ export class Enemy {
     }
 
     // State-based behavior
-    if (this.state === 'pursuing') {
+    if (this.state === 'pursuing' && this.alive) {
       this.pursuitAnimTime += dt
       // Move towards player
       this.toPlayer.set(playerPosition.x - pos.x, 0, playerPosition.z - pos.z)
@@ -255,7 +310,7 @@ export class Enemy {
           this.velocity.z += this.toPlayer.z * this.moveSpeed * 0.1 * dt
         }
       }
-    } else {
+    } else if (this.state === 'idle') {
       this.pursuitAnimTime = 0
       // Idle: apply friction
       if (this.grounded) {
@@ -270,6 +325,11 @@ export class Enemy {
           this.velocity.z = 0
         }
       }
+    } else {
+      // Dying/dead: no horizontal movement
+      this.pursuitAnimTime = 0
+      this.velocity.x = 0
+      this.velocity.z = 0
     }
 
     // Gravity
@@ -310,8 +370,27 @@ export class Enemy {
 
     // Sprite animation
     if (this.spriteReady) {
-      const frame = this.state === 'pursuing' ? Math.floor(this.pursuitAnimTime * this.pursuitFPS) % this.pursuitFrameCount : 0
-      this.renderSpriteFrame(frame)
+      if (this.state === 'pursuing') {
+        const frame = Math.floor(this.pursuitAnimTime * this.pursuitFPS) % this.pursuitFrameCount
+        this.renderSpriteFrame(frame)
+      } else if (this.state === 'dying' || this.state === 'dead') {
+        const last = this.deathStartFrame + (this.deathFrameCount - 1)
+        const frameOffset = Math.min(this.deathFrameCount - 1, Math.floor(this.deathAnimTime * this.deathFPS))
+        const frame = this.deathStartFrame + frameOffset
+        this.renderSpriteFrame(frame)
+
+        if (this.state === 'dying') {
+          this.deathAnimTime += dt
+          if (frame >= last) {
+            this.state = 'dead'
+            // Let the last frame render once, then disappear.
+            this.hideOnNextUpdate = true
+            this.spawnExplosionEvent = true
+          }
+        }
+      } else {
+        this.renderSpriteFrame(0)
+      }
     } else {
       // Re-render the animated checkerboard while sprites load
       this.renderCheckerboard()
