@@ -298,19 +298,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     animation: maskBounce 0.6s ease-out;
   `
   
-  // +1 text
-  const plusOneText = document.createElement('div')
-  plusOneText.style.cssText = `
-    font-size: 48px;
-    font-weight: bold;
-    color: #00ff00;
-    margin-left: 20px;
-    animation: plusOnePop 0.5s ease-out 0.3s both;
-    text-shadow: 0 0 20px #00ff00;
-  `
-  plusOneText.textContent = '+1'
-  
-  // Container for icon and text
+  // Container for icon
   const contentContainer = document.createElement('div')
   contentContainer.style.cssText = `
     display: flex;
@@ -318,7 +306,6 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     justify-content: center;
   `
   contentContainer.appendChild(maskIcon)
-  contentContainer.appendChild(plusOneText)
   maskCollectAnimation.appendChild(contentContainer)
   
   // Add CSS animation keyframes
@@ -329,15 +316,6 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       50% { transform: scale(1.2) rotate(10deg); }
       70% { transform: scale(0.9) rotate(-5deg); }
       100% { transform: scale(1) rotate(0deg); opacity: 1; }
-    }
-    @keyframes plusOnePop {
-      0% { transform: scale(0) translateY(50px); opacity: 0; }
-      50% { transform: scale(1.5) translateY(-20px); }
-      100% { transform: scale(1) translateY(0); opacity: 1; }
-    @keyframes textGlow {
-      0% { text-shadow: 0 0 10px #00ff00; }
-      50% { text-shadow: 0 0 30px #00ff00, 0 0 60px #00ff00; }
-      100% { text-shadow: 0 0 10px #00ff00; }
     }
   `
   document.head.appendChild(style)
@@ -359,19 +337,6 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     background: transparent;
   `
   
-  // "Second Mask Acquired" title
-  const secondMaskTitle = document.createElement('div')
-  secondMaskTitle.style.cssText = `
-    font-size: 52px;
-    font-weight: bold;
-    color: #ffffff;
-    margin-bottom: 30px;
-    animation: textGlow 1s ease-in-out infinite;
-    text-shadow: 0 0 20px #00ff00;
-    font-family: Arial, sans-serif;
-  `
-  secondMaskTitle.textContent = 'Second Mask Acquired'
-  
   // Big mask icon
   const secondMaskIcon = document.createElement('div')
   secondMaskIcon.style.cssText = `
@@ -384,22 +349,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     animation: maskBounce 0.8s ease-out;
     margin-bottom: 20px;
   `
-  
-  // "+1 Mask Acquired" text
-  const acquiredText = document.createElement('div')
-  acquiredText.style.cssText = `
-    font-size: 36px;
-    font-weight: bold;
-    color: #00ff00;
-    animation: plusOnePop 0.6s ease-out 0.5s both;
-    text-shadow: 0 0 20px #00ff00;
-    font-family: Arial, sans-serif;
-  `
-  acquiredText.textContent = '+1 Mask Acquired'
-  
-  secondMaskAnimation.appendChild(secondMaskTitle)
+
   secondMaskAnimation.appendChild(secondMaskIcon)
-  secondMaskAnimation.appendChild(acquiredText)
   root.appendChild(secondMaskAnimation)
   
   const spawnWorldItem0 = (worldPos: THREE.Vector3, sourceHalfHeight: number): void => {
@@ -1192,7 +1143,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     
     // Show/hide mask collection animation
     if (gameLoop.phase === 'restarting' && gameLoop.fadeReason === 'level-advance') {
-      // Level 2 shows "Second Mask Acquired" animation
+      // Level 2 shows the alternate mask animation
       if (gameLoop.currentLevel === 1) {
         secondMaskAnimation.style.display = 'flex'
         maskCollectAnimation.style.display = 'none'
