@@ -32,6 +32,10 @@ export class Enemy {
   private readonly orbCooldownSeconds = 6.0
   private readonly orbPreferredDistance = 4.0
   private readonly orbPreferredWindow = 1.0
+
+  // Enemy1 (tank) preferred standoff distance for attacking
+  private readonly tankPreferredDistance = 6.0
+  private readonly tankPreferredWindow = 0.75
   private orbChargeStartedEvent = false
   private orbShotEvent = false
   private readonly orbShotDir = new THREE.Vector3()
@@ -87,8 +91,10 @@ export class Enemy {
   private readonly cameraPos = new THREE.Vector3()
   private readonly groundRaycaster = new THREE.Raycaster()
   private readonly wallRaycaster = new THREE.Raycaster()
+  private readonly losRaycaster = new THREE.Raycaster()
   private readonly groundHits: THREE.Intersection[] = []
   private readonly wallHits: THREE.Intersection[] = []
+  private readonly losHits: THREE.Intersection[] = []
   private readonly wallDirs = [
     new THREE.Vector3(1, 0, 0),
     new THREE.Vector3(-1, 0, 0),
@@ -139,6 +145,7 @@ export class Enemy {
     this.wallRaycaster.far = this.enemyRadius + 0.1
     setRaycasterFirstHitOnly(this.groundRaycaster, true)
     setRaycasterFirstHitOnly(this.wallRaycaster, true)
+    setRaycasterFirstHitOnly(this.losRaycaster, true)
 
     // Load sprite sheet; fall back to checkerboard until ready
     this.spriteSheet = new Image()
@@ -150,6 +157,27 @@ export class Enemy {
 
     // Initial render
     this.renderCheckerboard()
+  }
+
+  private hasLineOfSightToPlayer(playerPosition: THREE.Vector3, collisionMeshes: THREE.Mesh[]): boolean {
+    if (collisionMeshes.length === 0) return true
+
+    const pos = this.mesh.position
+    // Cast from roughly the enemy "chest" height.
+    this.rayOrigin.set(pos.x, pos.y - this.enemyHeight + 1.4, pos.z)
+    this.rayDir.subVectors(playerPosition, this.rayOrigin)
+    const dist = this.rayDir.length()
+    if (dist <= 1e-3) return false
+    this.rayDir.multiplyScalar(1 / dist)
+
+    this.losRaycaster.set(this.rayOrigin, this.rayDir)
+    this.losRaycaster.far = dist
+    this.losHits.length = 0
+    this.losRaycaster.intersectObjects(collisionMeshes, false, this.losHits)
+    if (this.losHits.length === 0) return true
+
+    // If the first hit is basically at the player distance, treat as LoS.
+    return this.losHits[0].distance >= dist - 0.05
   }
 
   consumeOrbChargeStartedEvent(): boolean {
@@ -323,12 +351,14 @@ export class Enemy {
     this.toPlayer.set(playerPosition.x - pos.x, 0, playerPosition.z - pos.z)
     const distance = this.toPlayer.length()
 
+    const hasLoS = distance > 0.5 && this.hasLineOfSightToPlayer(playerPosition, collisionMeshes)
+
     // State transitions
-    if (this.state === 'idle' && distance < 15.0) {
-      // Start pursuing when player is within detection range
+    if (this.state === 'idle' && hasLoS) {
+      // Start pursuing as soon as the enemy gains line-of-sight.
       this.state = 'pursuing'
-    } else if (this.state === 'pursuing' && distance > 25.0) {
-      // Stop pursuing when player is too far away
+    } else if (this.state === 'pursuing' && distance > 25.0 && !hasLoS) {
+      // Stop pursuing when the player is too far and out of sight.
       this.state = 'idle'
     }
 
@@ -339,6 +369,7 @@ export class Enemy {
         !this.orbCharging &&
         distance > 0.75 &&
         Math.abs(distance - this.orbPreferredDistance) <= this.orbPreferredWindow &&
+        hasLoS &&
         this.time - this.lastOrbAttackTime >= this.orbCooldownSeconds
 
       if (canStartCharge) {
@@ -368,8 +399,9 @@ export class Enemy {
       }
 
       // Enemy0 keeps a bit more distance from the player.
-      const desiredDistance = this.type === 0 ? 4.0 : 1.5
-      const buffer = this.type === 0 ? 0.5 : 0
+      const desiredDistance = this.type === 0 ? 4.0 : this.type === 1 ? this.tankPreferredDistance : 1.5
+      const buffer = this.type === 0 ? 0.5 : this.type === 1 ? this.tankPreferredWindow : 0
+      const canBackOff = this.type === 0 || this.type === 1
 
       if (this.type === 0 && this.orbCharging) {
         // Stand still during charge.
@@ -386,7 +418,7 @@ export class Enemy {
           this.velocity.x += this.toPlayer.x * this.moveSpeed * 0.1 * dt
           this.velocity.z += this.toPlayer.z * this.moveSpeed * 0.1 * dt
         }
-      } else if (this.type === 0 && distance > 0.5 && distance < desiredDistance - buffer) {
+      } else if (canBackOff && distance > 0.5 && distance < desiredDistance - buffer) {
         // Too close: back off a bit.
         if (distance > 1e-6) this.toPlayer.multiplyScalar(1 / distance)
         if (this.grounded) {
@@ -460,8 +492,11 @@ export class Enemy {
     if (this.type === 1) {
       // Check if tank should attack (when pursuing and close enough)
       if (this.state === 'pursuing' && !this.isAttacking) {
-        const attackDistance = this.toPlayer.length()
-        if (attackDistance < 8.0) { // Attack range
+        const dx = playerPosition.x - pos.x
+        const dz = playerPosition.z - pos.z
+        const attackDistance = Math.sqrt(dx * dx + dz * dz)
+        const inAttackBand = Math.abs(attackDistance - this.tankPreferredDistance) <= this.tankPreferredWindow
+        if (inAttackBand) {
           // Attack every 2 seconds, but track last attack time
           if (!this.lastAttackTime) this.lastAttackTime = 0
           if (this.time - this.lastAttackTime > 2.0) {
