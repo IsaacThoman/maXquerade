@@ -23,6 +23,11 @@ export type ProjectileOptions = {
   startSize?: number
   sizeTransitionDuration?: number
   targetSize?: number
+  // Render-scale the sprite inside the canvas (pixelated zoom), without changing the plane size.
+  // Values are relative to the source frame size; useful for charge-up effects.
+  drawScaleStart?: number
+  drawScaleTarget?: number
+  drawScaleDuration?: number
   bounceRestitution?: number
   maxBounces?: number
 }
@@ -68,6 +73,7 @@ export class Projectile {
   private sheet: SpriteSheet | null = null
   private spriteReady = false
   private lastDrawnFrame = -1
+  private lastDrawnDrawScale = -1
 
   private readonly cameraPos = new THREE.Vector3()
   private readonly raycaster = new THREE.Raycaster()
@@ -81,6 +87,11 @@ export class Projectile {
   private readonly targetSize: number
   private readonly sizeTransitionDuration: number
   private currentSize: number
+
+  private readonly drawScaleStart: number
+  private readonly drawScaleTarget: number
+  private readonly drawScaleDuration: number
+  private currentDrawScale: number
 
   constructor(position: THREE.Vector3, velocity: THREE.Vector3, options: ProjectileOptions) {
     this.options = {
@@ -99,6 +110,9 @@ export class Projectile {
       startSize: options.size || 0.6,
       targetSize: options.size || 0.6,
       sizeTransitionDuration: 0.15,
+      drawScaleStart: 1,
+      drawScaleTarget: 1,
+      drawScaleDuration: 0,
       ...options,
     }
 
@@ -137,6 +151,11 @@ export class Projectile {
     this.targetSize = this.options.targetSize
     this.sizeTransitionDuration = this.options.sizeTransitionDuration
     this.currentSize = this.startSize
+
+    this.drawScaleStart = this.options.drawScaleStart
+    this.drawScaleTarget = this.options.drawScaleTarget
+    this.drawScaleDuration = this.options.drawScaleDuration
+    this.currentDrawScale = this.drawScaleStart
 
     setRaycasterFirstHitOnly(this.raycaster, true)
 
@@ -241,6 +260,14 @@ export class Projectile {
       this.currentSize = this.targetSize
     }
 
+    // Draw-scale transition (sprite zoom inside the canvas)
+    if (this.drawScaleDuration > 0 && this.ageSeconds < this.drawScaleDuration) {
+      const t = this.ageSeconds / this.drawScaleDuration
+      this.currentDrawScale = THREE.MathUtils.lerp(this.drawScaleStart, this.drawScaleTarget, t)
+    } else {
+      this.currentDrawScale = this.drawScaleTarget
+    }
+
     // Update mesh scale based on current size
     const aspect = this.options.frameWidth / this.options.frameHeight
     const h = this.currentSize
@@ -276,11 +303,16 @@ export class Projectile {
 
   private drawFrame(frame: number): void {
     if (!this.sheet) return
-    if (frame === this.lastDrawnFrame) return
+    // Redraw if either the sprite frame or the draw-scale changed.
+    if (frame === this.lastDrawnFrame && this.currentDrawScale === this.lastDrawnDrawScale) return
 
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-    this.sheet.drawFrame(this.ctx, frame, 0, 0, 1)
+    const s = Math.max(0.01, this.currentDrawScale)
+    const x = (this.canvas.width - this.options.frameWidth * s) * 0.5
+    const y = (this.canvas.height - this.options.frameHeight * s) * 0.5
+    this.sheet.drawFrame(this.ctx, frame, x, y, s)
     this.lastDrawnFrame = frame
+    this.lastDrawnDrawScale = this.currentDrawScale
     this.texture.needsUpdate = true
   }
 

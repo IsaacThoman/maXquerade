@@ -24,6 +24,18 @@ export class Enemy {
   private lastAttackTime: number = 0
   attacks: TankAttack[] = []
 
+  // Enemy0 orb attack (driven by Game.ts via events)
+  private orbCharging = false
+  private orbChargeStartTime = 0
+  private lastOrbAttackTime = -999
+  private readonly orbChargeDurationSeconds = 3.0
+  private readonly orbCooldownSeconds = 6.0
+  private readonly orbPreferredDistance = 4.0
+  private readonly orbPreferredWindow = 1.0
+  private orbChargeStartedEvent = false
+  private orbShotEvent = false
+  private readonly orbShotDir = new THREE.Vector3()
+
   private spriteSheet: HTMLImageElement
   private spriteReady = false
   private pursuitAnimTime = 0
@@ -138,6 +150,22 @@ export class Enemy {
 
     // Initial render
     this.renderCheckerboard()
+  }
+
+  consumeOrbChargeStartedEvent(): boolean {
+    const v = this.orbChargeStartedEvent
+    this.orbChargeStartedEvent = false
+    return v
+  }
+
+  consumeOrbShotDirection(): THREE.Vector3 | null {
+    if (!this.orbShotEvent) return null
+    this.orbShotEvent = false
+    return this.orbShotDir.clone()
+  }
+
+  get isOrbCharging(): boolean {
+    return this.orbCharging
   }
 
   private renderCheckerboard(): void {
@@ -304,22 +332,75 @@ export class Enemy {
       this.state = 'idle'
     }
 
+    // Enemy0 orb attack state machine (charge -> shoot)
+    if (this.type === 0 && this.alive && this.state === 'pursuing') {
+      // Avoid triggering when GameLoop is "pausing" enemies by passing playerPosition = enemyPosition.
+      const canStartCharge =
+        !this.orbCharging &&
+        distance > 0.75 &&
+        Math.abs(distance - this.orbPreferredDistance) <= this.orbPreferredWindow &&
+        this.time - this.lastOrbAttackTime >= this.orbCooldownSeconds
+
+      if (canStartCharge) {
+        this.orbCharging = true
+        this.orbChargeStartTime = this.time
+        this.orbChargeStartedEvent = true
+      }
+
+      if (this.orbCharging) {
+        const elapsed = this.time - this.orbChargeStartTime
+        if (elapsed >= this.orbChargeDurationSeconds) {
+          this.orbCharging = false
+          this.lastOrbAttackTime = this.time
+          // Aim at the player at the moment of firing.
+          this.orbShotDir.set(playerPosition.x - pos.x, playerPosition.y - pos.y, playerPosition.z - pos.z)
+          if (this.orbShotDir.lengthSq() > 1e-6) this.orbShotDir.normalize()
+          else this.orbShotDir.set(0, 0, -1)
+          this.orbShotEvent = true
+        }
+      }
+    }
+
     // State-based behavior
     if (this.state === 'pursuing' && this.alive) {
-      this.pursuitAnimTime += dt
-      
-      if (distance > 1.5) {
-        // Don't get too close
-        this.toPlayer.normalize()
+      if (!(this.type === 0 && this.orbCharging)) {
+        this.pursuitAnimTime += dt
+      }
 
-        // Accelerate towards player
+      // Enemy0 keeps a bit more distance from the player.
+      const desiredDistance = this.type === 0 ? 4.0 : 1.5
+      const buffer = this.type === 0 ? 0.5 : 0
+
+      if (this.type === 0 && this.orbCharging) {
+        // Stand still during charge.
+        this.velocity.x = 0
+        this.velocity.z = 0
+      } else if (distance > desiredDistance + buffer) {
+        // Approach
+        if (distance > 1e-6) this.toPlayer.multiplyScalar(1 / distance)
+
         if (this.grounded) {
           this.velocity.x = this.toPlayer.x * this.moveSpeed
           this.velocity.z = this.toPlayer.z * this.moveSpeed
         } else {
-          // Less control in air
           this.velocity.x += this.toPlayer.x * this.moveSpeed * 0.1 * dt
           this.velocity.z += this.toPlayer.z * this.moveSpeed * 0.1 * dt
+        }
+      } else if (this.type === 0 && distance > 0.5 && distance < desiredDistance - buffer) {
+        // Too close: back off a bit.
+        if (distance > 1e-6) this.toPlayer.multiplyScalar(1 / distance)
+        if (this.grounded) {
+          this.velocity.x = -this.toPlayer.x * this.moveSpeed
+          this.velocity.z = -this.toPlayer.z * this.moveSpeed
+        } else {
+          this.velocity.x += -this.toPlayer.x * this.moveSpeed * 0.1 * dt
+          this.velocity.z += -this.toPlayer.z * this.moveSpeed * 0.1 * dt
+        }
+      } else {
+        // In the sweet spot: stop.
+        if (this.grounded) {
+          this.velocity.x = 0
+          this.velocity.z = 0
         }
       }
     } else if (this.state === 'idle') {
