@@ -41,7 +41,8 @@ export class BaseOverlayWorld {
   private euler = new THREE.Euler(0, 0, 0, 'YXZ')
   private yaw = 0
   private pitch = 0
-  private readonly maxPitch = Math.PI * 0.49
+  private readonly minPitch = -Math.PI * 0.49
+  private readonly maxPitch = THREE.MathUtils.degToRad(20)
   private disposed = false
 
   private readonly aimAssistTargets: THREE.Object3D[] = []
@@ -123,7 +124,7 @@ export class BaseOverlayWorld {
     this.yaw += movementX * sensitivity
     this.pitch += movementY * sensitivity
 
-    this.pitch = Math.max(-this.maxPitch, Math.min(this.maxPitch, this.pitch))
+    this.pitch = THREE.MathUtils.clamp(this.pitch, this.minPitch, this.maxPitch)
     this.updateCamera()
   }
 
@@ -186,7 +187,7 @@ export class BaseOverlayWorld {
     const targetYaw = this.aimAssistEuler.y
     const t = 1 - Math.exp(-this.aimAssistDamping * dt)
 
-    this.pitch = Math.max(-this.maxPitch, Math.min(this.maxPitch, this.lerpAngle(this.pitch, targetPitch, t)))
+    this.pitch = THREE.MathUtils.clamp(this.lerpAngle(this.pitch, targetPitch, t), this.minPitch, this.maxPitch)
     this.yaw = this.lerpAngle(this.yaw, targetYaw, t)
     this.updateCamera()
     return true
