@@ -12,6 +12,7 @@ export const FRAME_TIMING_KEYS = [
   'render.enemies.unmasked',
   'render.enemies.masked',
   'render.overlay',
+  'render.hand',
 ] as const
 
 export type FrameTimingKey = (typeof FRAME_TIMING_KEYS)[number]

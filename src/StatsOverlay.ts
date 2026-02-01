@@ -15,6 +15,7 @@ const TIMING_DISPLAY_ORDER: readonly FrameTimingKey[] = [
   'render.enemies.unmasked',
   'render.enemies.masked',
   'render.overlay',
+  'render.hand',
 ]
 
 export interface StatsData {
