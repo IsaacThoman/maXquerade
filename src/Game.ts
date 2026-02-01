@@ -9,6 +9,7 @@ import { Projectile } from './Projectile'
 import { GroundItem } from './GroundItem'
 import { computeBoundsTreeOnce, disposeBoundsTreeIfPresent, initThreeMeshBVH, setRaycasterFirstHitOnly } from './bvh'
 import { FrameProfiler } from './FrameProfiler'
+import { Inventory } from './Inventory'
 
 type Cleanup = () => void
 
@@ -46,6 +47,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const baseOverlayWorld = new BaseOverlayWorld({
     aspect: Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
   })
+
+  const inventory = new Inventory()
+  const item0Id = 0 as const
+  baseOverlayWorld.setEnabled(inventory.has(item0Id))
 
   const handViewModel = new HandViewModel({
     aspect: Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
@@ -113,7 +118,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
   const projectiles: Projectile[] = []
   const effects: Projectile[] = []
-  const groundItems: GroundItem[] = []
+  type WorldItem = { id: number; gi: GroundItem }
+  const groundItems: WorldItem[] = []
 
   const worldItems = {
     spriteSrc: '/sprites/worlditems.png',
@@ -123,17 +129,27 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     framesPerRow: 2,
   } as const
 
-  // Ground item pickup (first sprite from 2x2 worlditems sheet)
-  const worldItem0 = new GroundItem(new THREE.Vector3(18, 1, -20), {
-    ...worldItems,
-    frameIndex: 0,
-    size: 1.1,
-    bobAmplitude: 0.22,
-    bobFrequencyHz: 0.5,
-    spinSpeedRadPerSec: 1,
-  })
-  scene.add(worldItem0.mesh)
-  groundItems.push(worldItem0)
+  const hasWorldItemInWorld = (id: number): boolean => groundItems.some((gi) => gi.id === id)
+
+  const spawnWorldItem0 = (worldPos: THREE.Vector3, sourceHalfHeight: number): void => {
+    if (inventory.has(item0Id)) return
+    if (hasWorldItemInWorld(item0Id)) return
+
+    const dropPos = worldPos.clone()
+    dropPos.y = worldPos.y - sourceHalfHeight + 1
+
+    const gi = new GroundItem(dropPos, {
+      ...worldItems,
+      frameIndex: 0,
+      size: 1.1,
+      bobAmplitude: 0.22,
+      bobFrequencyHz: 0.5,
+      spinSpeedRadPerSec: 1,
+    })
+
+    scene.add(gi.mesh)
+    groundItems.push({ id: item0Id, gi })
+  }
 
   const spawnExplosion = (worldPos: THREE.Vector3): void => {
     const fx = new Projectile(worldPos.clone(), new THREE.Vector3(0, 0, 0), {
@@ -724,12 +740,38 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
       if (e.consumeExplosionEvent()) {
         spawnExplosion(e.mesh.position)
+
+        if (e.type === 0) {
+          spawnWorldItem0(e.mesh.position, e.halfHeight)
+        }
       }
     }
     const enemyMs = performance.now() - enemyStart
 
-    for (const gi of groundItems) {
-      gi.update({ dt, camera })
+    for (const wi of groundItems) {
+      wi.gi.update({ dt, camera })
+    }
+
+    // World item pickup
+    const pickupRadius = 1.2
+    const pickupRadiusSq = pickupRadius * pickupRadius
+    for (let i = groundItems.length - 1; i >= 0; i--) {
+      const wi = groundItems[i]
+      const dx = wi.gi.mesh.position.x - player.position.x
+      const dz = wi.gi.mesh.position.z - player.position.z
+      if (dx * dx + dz * dz > pickupRadiusSq) continue
+
+      const dy = Math.abs(wi.gi.mesh.position.y - player.position.y)
+      if (dy > 2.5) continue
+
+      inventory.add(wi.id)
+      if (wi.id === item0Id) {
+        baseOverlayWorld.setEnabled(true)
+      }
+
+      scene.remove(wi.gi.mesh)
+      wi.gi.dispose()
+      groundItems.splice(i, 1)
     }
 
     for (let i = projectiles.length - 1; i >= 0; i--) {
@@ -816,30 +858,36 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     renderer.render(unmaskedEnemyScene, camera)
     const renderEnemiesUnmaskedMs = performance.now() - renderEnemiesUnmaskedStart
     
-    // Pass 2: Render alpha mask to STENCIL BUFFER ONLY (eye holes)
-    // Configure stencil: write 1 where alpha mask is drawn
-    const renderMaskStart = performance.now()
-    gl.enable(gl.STENCIL_TEST)
-    gl.stencilFunc(gl.ALWAYS, 1, 0xff)
-    gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE)
-    gl.colorMask(false, false, false, false) // Don't write to color buffer
-    gl.depthMask(false) // Don't write to depth buffer
+    let renderMaskMs = 0
+    let renderEnemiesMaskedMs = 0
+    let renderOverlayMs = 0
 
-    renderer.render(baseOverlayWorld.alphaMaskScene, baseOverlayWorld.alphaMaskCamera)
-    const renderMaskMs = performance.now() - renderMaskStart
-    
-    // Pass 3: Render masked enemies ONLY where stencil == 1 (eye holes)
-    const renderEnemiesMaskedStart = performance.now()
-    gl.stencilFunc(gl.EQUAL, 1, 0xff)
-    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP)
-    gl.colorMask(true, true, true, true) // Write to color buffer
-    gl.depthMask(true) // Write to depth buffer
+    if (baseOverlayWorld.isEnabled) {
+      // Pass 2: Render alpha mask to STENCIL BUFFER ONLY (eye holes)
+      // Configure stencil: write 1 where alpha mask is drawn
+      const renderMaskStart = performance.now()
+      gl.enable(gl.STENCIL_TEST)
+      gl.stencilFunc(gl.ALWAYS, 1, 0xff)
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE)
+      gl.colorMask(false, false, false, false) // Don't write to color buffer
+      gl.depthMask(false) // Don't write to depth buffer
 
-    renderer.render(maskedEnemyScene, camera)
+      renderer.render(baseOverlayWorld.alphaMaskScene, baseOverlayWorld.alphaMaskCamera)
+      renderMaskMs = performance.now() - renderMaskStart
 
-    // Disable stencil for the rest
-    gl.disable(gl.STENCIL_TEST)
-    const renderEnemiesMaskedMs = performance.now() - renderEnemiesMaskedStart
+      // Pass 3: Render masked enemies ONLY where stencil == 1 (eye holes)
+      const renderEnemiesMaskedStart = performance.now()
+      gl.stencilFunc(gl.EQUAL, 1, 0xff)
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP)
+      gl.colorMask(true, true, true, true) // Write to color buffer
+      gl.depthMask(true) // Write to depth buffer
+
+      renderer.render(maskedEnemyScene, camera)
+
+      // Disable stencil for the rest
+      gl.disable(gl.STENCIL_TEST)
+      renderEnemiesMaskedMs = performance.now() - renderEnemiesMaskedStart
+    }
     
     // Pass 4: Render hand viewmodel (beneath mask overlay)
     const renderHandStart = performance.now()
@@ -847,11 +895,13 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     renderer.render(handViewModel.scene, handViewModel.camera)
     const renderHandMs = performance.now() - renderHandStart
 
-    // Pass 5: Render the mask overlay on top of everything
-    const renderOverlayStart = performance.now()
-    renderer.clearDepth()
-    renderer.render(baseOverlayWorld.scene, baseOverlayWorld.camera)
-    const renderOverlayMs = performance.now() - renderOverlayStart
+    if (baseOverlayWorld.isEnabled) {
+      // Pass 5: Render the mask overlay on top of everything
+      const renderOverlayStart = performance.now()
+      renderer.clearDepth()
+      renderer.render(baseOverlayWorld.scene, baseOverlayWorld.camera)
+      renderOverlayMs = performance.now() - renderOverlayStart
+    }
 
     const renderMs = renderWorldMs + renderEnemiesUnmaskedMs + renderMaskMs + renderEnemiesMaskedMs + renderOverlayMs + renderHandMs
     const frameMs = performance.now() - frameStart
@@ -918,9 +968,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       scene.remove(fx.mesh)
       fx.dispose()
     }
-    for (const gi of groundItems) {
-      scene.remove(gi.mesh)
-      gi.dispose()
+    for (const wi of groundItems) {
+      scene.remove(wi.gi.mesh)
+      wi.gi.dispose()
     }
 
     baseOverlayWorld.dispose()

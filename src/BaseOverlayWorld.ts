@@ -11,6 +11,8 @@ export class BaseOverlayWorld {
   readonly scene: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
 
+  private enabled = false
+
   private planeGeometry: THREE.PlaneGeometry
   private planeMaterial: THREE.MeshBasicMaterial
   private plane: THREE.Mesh
@@ -76,6 +78,7 @@ export class BaseOverlayWorld {
       depthWrite: false,
     })
     this.plane = new THREE.Mesh(this.planeGeometry, this.planeMaterial)
+    this.plane.visible = false
     this.scene.add(this.plane)
 
     // Alpha mask scene (for stencil-based enemy visibility through eye holes)
@@ -92,10 +95,21 @@ export class BaseOverlayWorld {
       alphaTest: 0.5, // Only draw (and write to stencil) where alpha > 0.5
     })
     this.alphaMaskPlane = new THREE.Mesh(this.alphaMaskGeometry, this.alphaMaskMaterial)
+    this.alphaMaskPlane.visible = false
     this.alphaMaskScene.add(this.alphaMaskPlane)
 
     this.updateCamera()
     this.loadAssets(animImageSrc, alphaMaskSrc)
+  }
+
+  get isEnabled(): boolean {
+    return this.enabled
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled
+    this.plane.visible = enabled
+    this.alphaMaskPlane.visible = enabled
   }
 
   update(dt: number, aimAssistActive = false): void {
