@@ -11,7 +11,7 @@ export class BaseOverlayWorld {
   readonly scene: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
 
-  private enabled = false
+  private mask0Enabled = false
   private mask1Enabled = false
 
   // Mask 0 (item 0)
@@ -38,8 +38,8 @@ export class BaseOverlayWorld {
   private alphaMaskCtx: CanvasRenderingContext2D | null = null
   private alphaMaskAnim: SpriteSheet | null = null
 
-  private animX = 0
-  private animY = 0
+  // Mask 1 (item 1)
+  private plane1Geometry: THREE.PlaneGeometry
   private plane1Material: THREE.MeshBasicMaterial
   private plane1: THREE.Mesh
   private texture1: THREE.CanvasTexture | null = null
@@ -59,8 +59,8 @@ export class BaseOverlayWorld {
   private alphaMaskAnim1: SpriteSheet | null = null
 
   private animScale = 1
-  private animFrame = 0
-  private animTimer = 0
+  private mask0Frame = 0
+  private mask0Timer = 0
   private mask1Frame = 0
   private mask1Timer = 0
   private readonly animFps = 14
@@ -167,7 +167,7 @@ export class BaseOverlayWorld {
 
   setMask1Enabled(enabled: boolean): void {
     this.mask1Enabled = enabled
-    this.updateVisibility()
+    this.plane1.visible = enabled
   }
 
   update(dt: number, aimAssistActive = false): void {
