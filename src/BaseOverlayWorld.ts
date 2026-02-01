@@ -120,8 +120,8 @@ export class BaseOverlayWorld {
     const movementY = event.movementY || 0
     const sensitivity = 0.0025
 
-    this.yaw -= movementX * sensitivity
-    this.pitch -= movementY * sensitivity
+    this.yaw += movementX * sensitivity
+    this.pitch += movementY * sensitivity
 
     this.pitch = Math.max(-this.maxPitch, Math.min(this.maxPitch, this.pitch))
     this.updateCamera()

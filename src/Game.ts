@@ -5,6 +5,7 @@ import { StatsOverlay } from './StatsOverlay'
 import { Enemy } from './Enemy'
 import { BaseOverlayWorld } from './BaseOverlayWorld'
 import { HandViewModel } from './HandViewModel'
+import { Projectile } from './Projectile'
 import { computeBoundsTreeOnce, disposeBoundsTreeIfPresent, initThreeMeshBVH, setRaycasterFirstHitOnly } from './bvh'
 import { FrameProfiler } from './FrameProfiler'
 
@@ -100,6 +101,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     new Enemy(new THREE.Vector3(-7.15, 5.0, -6.25), 'idle', 1),
   ]
 
+  const projectiles: Projectile[] = []
+
   for (const e of enemies) {
     if (e.type === 0) unmaskedEnemyScene.add(e.mesh)
     else maskedEnemyScene.add(e.mesh)
@@ -171,6 +174,45 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const rayDir = new THREE.Vector3()
   const frozenCameraQuat = new THREE.Quaternion()
   const up = new THREE.Vector3(0, 1, 0)
+
+  const projectileSpawnPos = new THREE.Vector3()
+  const projectileDir = new THREE.Vector3()
+  const projectileRight = new THREE.Vector3()
+  const spawnKnifeProjectile = () => {
+    camera.getWorldDirection(projectileDir)
+    projectileDir.normalize()
+    projectileRight.crossVectors(projectileDir, up).normalize()
+
+    projectileSpawnPos.copy(camera.position)
+    projectileSpawnPos.addScaledVector(projectileDir, 0.75)
+    projectileSpawnPos.addScaledVector(projectileRight, 0.18)
+    projectileSpawnPos.addScaledVector(up, -0.16)
+
+    const projectileVelocity = new THREE.Vector3()
+      .copy(projectileDir)
+      .multiplyScalar(32)
+      .addScaledVector(velocity, 0.25)
+
+    const p = new Projectile(projectileSpawnPos, projectileVelocity, {
+      spriteSrc: '/sprites/knife_projectile.png',
+      frameWidth: 32,
+      frameHeight: 32,
+      frameCount: 4,
+      framesPerRow: 2,
+      fps: 18,
+      size: 1.25,
+      billboard: 'upright',
+      alphaTest: 0.35,
+      gravity: 0,
+      drag: 0,
+      lifetimeSeconds: 2.0,
+      collisionRadius: 0.16,
+      collideWithWorld: true,
+    })
+
+    scene.add(p.mesh)
+    projectiles.push(p)
+  }
 
   // Raycasters for collision
   const groundRaycaster = new THREE.Raycaster()
@@ -277,6 +319,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const onMouseDown = (event: MouseEvent) => {
     if (event.button === 0) {
       handViewModel.triggerThrow()
+      spawnKnifeProjectile()
       return
     }
     if (event.button !== 2) return
@@ -589,6 +632,16 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     }
     const enemyMs = performance.now() - enemyStart
 
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i]
+      p.update({ dt, camera, collisionMeshes })
+      if (!p.alive) {
+        scene.remove(p.mesh)
+        p.dispose()
+        projectiles.splice(i, 1)
+      }
+    }
+
     const overlayStart = performance.now()
     baseOverlayWorld.update(dt, !isOverlayRotateHeld())
     handViewModel.update(dt)
@@ -702,6 +755,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     }
 
      for (const e of enemies) e.dispose()
+     for (const p of projectiles) {
+       scene.remove(p.mesh)
+       p.dispose()
+     }
      baseOverlayWorld.dispose()
      handViewModel.dispose()
      statsOverlay.destroy()
