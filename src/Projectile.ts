@@ -20,9 +20,6 @@ export type ProjectileOptions = {
   collisionRadius?: number
   collisionEpsilon?: number
   collideWithWorld?: boolean
-  startSize?: number
-  sizeTransitionDuration?: number
-  targetSize?: number
   bounceRestitution?: number
   maxBounces?: number
 }
@@ -77,11 +74,6 @@ export class Projectile {
   private readonly hitNormal = new THREE.Vector3()
   private readonly normalMatrix = new THREE.Matrix3()
 
-  private readonly startSize: number
-  private readonly targetSize: number
-  private readonly sizeTransitionDuration: number
-  private currentSize: number
-
   constructor(position: THREE.Vector3, velocity: THREE.Vector3, options: ProjectileOptions) {
     this.options = {
       fps: 12,
@@ -96,9 +88,6 @@ export class Projectile {
       collideWithWorld: true,
       bounceRestitution: 0,
       maxBounces: 0,
-      startSize: options.size || 0.6,
-      targetSize: options.size || 0.6,
-      sizeTransitionDuration: 0.15,
       ...options,
     }
 
@@ -131,12 +120,6 @@ export class Projectile {
 
     this.mesh = new THREE.Mesh(geometry, material)
     this.mesh.position.copy(position)
-
-    // Initialize size transition properties
-    this.startSize = this.options.startSize
-    this.targetSize = this.options.targetSize
-    this.sizeTransitionDuration = this.options.sizeTransitionDuration
-    this.currentSize = this.startSize
 
     setRaycasterFirstHitOnly(this.raycaster, true)
 
@@ -232,20 +215,6 @@ export class Projectile {
       if (this.options.billboard === 'upright') this.cameraPos.y = pos.y
       this.mesh.lookAt(this.cameraPos)
     }
-
-    // Size transition
-    if (this.ageSeconds < this.sizeTransitionDuration) {
-      const t = this.ageSeconds / this.sizeTransitionDuration
-      this.currentSize = THREE.MathUtils.lerp(this.startSize, this.targetSize, t)
-    } else {
-      this.currentSize = this.targetSize
-    }
-
-    // Update mesh scale based on current size
-    const aspect = this.options.frameWidth / this.options.frameHeight
-    const h = this.currentSize
-    const w = h * aspect
-    this.mesh.scale.set(w / this.options.size, h / this.options.size, 1)
 
     // Animation
     if (this.spriteReady && this.sheet) {
