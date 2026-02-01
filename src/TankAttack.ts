@@ -160,22 +160,12 @@ export class TankAttack {
   }
   
   private renderPlaceholder(): void {
-    // Initialize placeholder colors for different particles - bright green gradient
-    const colors = ['#00ff00', '#00cc00', '#009900', '#006600'] // Bright to dark green gradient
-    
     for (const mesh of this.meshes) {
       const userData = mesh.userData as { spriteIndex: number; ctx: CanvasRenderingContext2D; texture: THREE.CanvasTexture }
       const ctx = userData.ctx
       const texture = userData.texture
       
       ctx.clearRect(0, 0, 16, 16)
-      ctx.fillStyle = colors[userData.spriteIndex]
-      ctx.fillRect(0, 0, 16, 16)
-      
-      // Add bright center for visibility
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(6, 6, 4, 4)
-      
       texture.needsUpdate = true
     }
   }

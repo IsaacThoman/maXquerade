@@ -198,19 +198,7 @@ export class Enemy {
 
   private renderCheckerboard(): void {
     const ctx = this.ctx
-    const tileSize = 4 // 4x4 pixel tiles
-    const offset = Math.floor(this.time * 4) % (tileSize * 2) // Animation offset
-
-    for (let y = 0; y < this.height; y++) {
-      for (let x = 0; x < this.width; x++) {
-        // Animate by shifting the pattern
-        const shiftedX = x + offset
-        const isLight = (Math.floor(shiftedX / tileSize) + Math.floor(y / tileSize)) % 2 === 0
-        ctx.fillStyle = isLight ? '#ff00ff' : '#00ffff'
-        ctx.fillRect(x, y, 1, 1)
-      }
-    }
-
+    ctx.clearRect(0, 0, this.width, this.height)
     this.texture.needsUpdate = true
   }
 

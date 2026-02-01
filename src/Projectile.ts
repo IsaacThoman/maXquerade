@@ -332,10 +332,6 @@ export class Projectile {
   private renderPlaceholder(): void {
     const ctx = this.ctx
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-    ctx.fillStyle = '#ff00ff'
-    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
-    ctx.fillStyle = '#000000'
-    ctx.fillRect(1, 1, this.canvas.width - 2, this.canvas.height - 2)
     this.texture.needsUpdate = true
   }
 }
