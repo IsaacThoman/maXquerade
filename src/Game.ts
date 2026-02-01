@@ -107,11 +107,35 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   // Type 1: only visible through mask alpha
   const enemies: Enemy[] = [
     new Enemy(new THREE.Vector3(0, 5.0, -20), 'idle', 0),
-    new Enemy(new THREE.Vector3(-7.15, 5.0, -6.25), 'idle', 1),
+    new Enemy(new THREE.Vector3(-3, 5.0, -15), 'idle', 1),
   ]
 
   const projectiles: Projectile[] = []
   const effects: Projectile[] = []
+
+  const spawnExplosion = (worldPos: THREE.Vector3): void => {
+    const fx = new Projectile(worldPos.clone(), new THREE.Vector3(0, 0, 0), {
+      spriteSrc: '/sprites/explode_reordered.png',
+      frameWidth: 200,
+      frameHeight: 282,
+      frameCount: 17,
+      framesPerRow: 17,
+      fps: 24,
+      size: 10.0,
+      billboard: 'full',
+      alphaTest: 0.05,
+      gravity: 0,
+      drag: 0,
+      lifetimeSeconds: 17 / 24,
+      collisionRadius: 0,
+      collideWithWorld: false,
+      maxBounces: 0,
+      bounceRestitution: 0,
+    })
+
+    scene.add(fx.mesh)
+    effects.push(fx)
+  }
 
   for (const e of enemies) {
     if (e.type === 0) unmaskedEnemyScene.add(e.mesh)
@@ -677,27 +701,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       })
 
       if (e.consumeExplosionEvent()) {
-        const fx = new Projectile(e.mesh.position.clone(), new THREE.Vector3(0, 0, 0), {
-          spriteSrc: '/sprites/explode_reordered.png',
-          frameWidth: 200,
-          frameHeight: 282,
-          frameCount: 17,
-          framesPerRow: 17,
-          fps: 24,
-          size: 5.0,
-          billboard: 'full',
-          alphaTest: 0.05,
-          gravity: 0,
-          drag: 0,
-          lifetimeSeconds: 17 / 24,
-          collisionRadius: 0,
-          collideWithWorld: false,
-          maxBounces: 0,
-          bounceRestitution: 0,
-        })
-
-        scene.add(fx.mesh)
-        effects.push(fx)
+        spawnExplosion(e.mesh.position)
       }
     }
     const enemyMs = performance.now() - enemyStart
@@ -733,6 +737,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
           e.kill()
 
           if (e.type !== 0) {
+            // No death animation: explode immediately.
+            spawnExplosion(e.mesh.position)
+
             // For now, non-type-0 enemies just disappear.
             maskedEnemyScene.remove(e.mesh)
             e.dispose()

@@ -196,6 +196,7 @@ export class Enemy {
 
     // Other enemy types: disappear for now.
     this.state = 'dead'
+
     this.mesh.visible = false
   }
 
