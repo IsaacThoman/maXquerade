@@ -184,7 +184,7 @@ export class Enemy {
       this.spriteReady = true
       this.renderSpriteFrame(0)
     }
-    this.spriteSheet.src = this.type === 1 ? 'sprites/enemy1.png' : this.type === 2 ? 'sprites/enemy2.png' : 'sprites/enemy0.png'
+    this.spriteSheet.src = this.type === 1 ? 'sprites/enemy1.png' : this.type === 2 ? 'sprites/enemy2.png' : this.type === 3 ? 'sprites/enemy3.png' : 'sprites/enemy0.png'
 
     // Initial render
     this.renderCheckerboard()
