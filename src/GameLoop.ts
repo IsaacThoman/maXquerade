@@ -4,7 +4,7 @@ import { Enemy } from './Enemy'
 export type GamePhase = 'intro' | 'playing' | 'enemy-defeated' | 'fade-out' | 'fade-in' | 'restarting'
 
 export interface EnemyConfig {
-  type: 0 | 1
+  type: 0 | 1 | 2
   position: THREE.Vector3
   state: 'idle' | 'pursuing'
 }
@@ -39,12 +39,21 @@ export class GameLoop {
       ],
       waitForPlayerMovement: true
     },
-    // Level 3: 3 enemies (2 type 0 + 1 type 1) at different positions
+    // Level 3: 5 enemies (2 type 0 + 1 type 1 + 2 type 2) at different positions
     {
       enemies: [
         { type: 0, position: new THREE.Vector3(-10, 3.0, -25), state: 'idle' },
         { type: 0, position: new THREE.Vector3(15, 3.0, -30), state: 'idle' },
-        { type: 1, position: new THREE.Vector3(15, 3.0, -18), state: 'pursuing' }
+        { type: 1, position: new THREE.Vector3(15, 3.0, -18), state: 'pursuing' },
+        { type: 2, position: new THREE.Vector3(8, 5.0, -29), state: 'pursuing' },
+        { type: 2, position: new THREE.Vector3(33, 5.0, -38), state: 'pursuing' }
+      ],
+      waitForPlayerMovement: true
+    },
+    // Level 4: Test level with enemy2 (rusher)
+    {
+      enemies: [
+        { type: 2, position: new THREE.Vector3(0, 3.0, -20), state: 'pursuing' }
       ],
       waitForPlayerMovement: true
     }

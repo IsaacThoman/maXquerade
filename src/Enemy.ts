@@ -5,7 +5,7 @@ import {Vector3} from "three";
 
 export type EnemyState = 'idle' | 'pursuing' | 'dying' | 'dead'
 
-export type EnemyType = 0 | 1
+export type EnemyType = 0 | 1 | 2
 
 export interface EnemyUpdateParams {
   dt: number
@@ -39,6 +39,23 @@ export class Enemy {
   private orbChargeStartedEvent = false
   private orbShotEvent = false
   private readonly orbShotDir = new THREE.Vector3()
+
+  // Enemy2 (rusher) behavior state
+  private rusherState: 'approaching' | 'spinning' | 'rushing' | 'recovering' = 'approaching'
+  private readonly rusherPreferredDistance = 10.0
+  private readonly rusherMaxApproachTime = 4.0 // seconds before dashing even if not at preferred distance
+  private readonly rusherSpinDuration = 1.5 // seconds to spin
+  private readonly rusherRushSpeed = 25.0 // fast rush speed
+  private readonly rusherRecoverTime = 1.0 // seconds to wait after hitting wall
+  private rusherStateTimer = 0
+  private rusherRushDir = new THREE.Vector3()
+  public hitPlayerThisRush = false // Public so Game.ts can check it
+  
+  // Stuck detection for when enemy is blocked by walls
+  private lastPosition = new THREE.Vector3()
+  private stuckTimer = 0
+  private readonly stuckThreshold = 0.5 // minimum movement to not be considered stuck
+  private readonly stuckTimeLimit = 2.0 // seconds before considering stuck
 
   private spriteSheet: HTMLImageElement
   private spriteReady = false
@@ -137,6 +154,9 @@ export class Enemy {
 
     this.mesh = new THREE.Mesh(geometry, material)
     this.mesh.position.copy(position)
+    
+    // Initialize lastPosition for stuck detection
+    this.lastPosition.copy(position)
 
     this.state = state
 
@@ -153,7 +173,7 @@ export class Enemy {
       this.spriteReady = true
       this.renderSpriteFrame(0)
     }
-    this.spriteSheet.src = this.type === 1 ? '/sprites/enemy1.png' : '/sprites/enemy0.png'
+    this.spriteSheet.src = this.type === 1 ? '/sprites/enemy1.png' : this.type === 2 ? '/sprites/enemy2.png' : '/sprites/enemy0.png'
 
     // Initial render
     this.renderCheckerboard()
@@ -309,6 +329,101 @@ export class Enemy {
   }
 
   /**
+   * Enemy2 (rusher) behavior: approach to 10m, spin, then rush in straight line
+   */
+  private updateRusherBehavior(dt: number, pos: THREE.Vector3, playerPosition: THREE.Vector3, _collisionMeshes: THREE.Mesh[]): void {
+    // Track distance to player
+    const distToPlayer = Math.sqrt(
+      (playerPosition.x - pos.x) ** 2 + (playerPosition.z - pos.z) ** 2
+    )
+
+    // Update state timer
+    this.rusherStateTimer += dt
+    
+    // Stuck detection - check if we've moved significantly
+    const movedDistance = pos.distanceTo(this.lastPosition)
+    if (movedDistance < this.stuckThreshold) {
+      this.stuckTimer += dt
+    } else {
+      this.stuckTimer = 0
+    }
+    this.lastPosition.copy(pos)
+
+    switch (this.rusherState) {
+      case 'approaching':
+        this.hitPlayerThisRush = false
+        // Move towards player until within 10m OR timeout reached OR stuck
+        const isStuck = this.stuckTimer >= this.stuckTimeLimit
+        const shouldDash = distToPlayer <= this.rusherPreferredDistance || 
+                          this.rusherStateTimer >= this.rusherMaxApproachTime ||
+                          isStuck
+        
+        if (!shouldDash) {
+          const toPlayerX = (playerPosition.x - pos.x) / distToPlayer
+          const toPlayerZ = (playerPosition.z - pos.z) / distToPlayer
+          this.velocity.x = toPlayerX * this.moveSpeed
+          this.velocity.z = toPlayerZ * this.moveSpeed
+        } else {
+          // Close enough, timeout, or stuck - start spinning
+          this.rusherState = 'spinning'
+          this.rusherStateTimer = 0
+          this.stuckTimer = 0
+          this.velocity.x = 0
+          this.velocity.z = 0
+        }
+        break
+
+      case 'spinning':
+        // Spin in place (2 full rotations)
+        const spinProgress = this.rusherStateTimer / this.rusherSpinDuration
+        this.mesh.rotation.y = spinProgress * Math.PI * 4 // 2 full rotations
+        
+        if (this.rusherStateTimer >= this.rusherSpinDuration) {
+          // Done spinning, start rushing
+          this.rusherState = 'rushing'
+          this.rusherStateTimer = 0
+          // Store direction to player at moment of rush start
+          const dx = playerPosition.x - pos.x
+          const dz = playerPosition.z - pos.z
+          const dist = Math.sqrt(dx * dx + dz * dz)
+          if (dist > 0.01) {
+            this.rusherRushDir.set(dx / dist, 0, dz / dist)
+          } else {
+            this.rusherRushDir.set(0, 0, -1)
+          }
+        }
+        break
+
+      case 'rushing':
+        // Rush in straight line at high speed
+        this.velocity.x = this.rusherRushDir.x * this.rusherRushSpeed
+        this.velocity.z = this.rusherRushDir.z * this.rusherRushSpeed
+        
+        // Check if we hit a wall (wall collision will stop velocity)
+        const speed = Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2)
+        if (speed < this.rusherRushSpeed * 0.5) {
+          // Hit a wall, go to recovering state
+          this.rusherState = 'recovering'
+          this.rusherStateTimer = 0
+          this.velocity.x = 0
+          this.velocity.z = 0
+        }
+        break
+
+      case 'recovering':
+        // Wait a moment after hitting wall, then go back to approaching
+        this.velocity.x = 0
+        this.velocity.z = 0
+        if (this.rusherStateTimer >= this.rusherRecoverTime) {
+          this.rusherState = 'approaching'
+          this.rusherStateTimer = 0
+          this.hitPlayerThisRush = false
+        }
+        break
+    }
+  }
+
+  /**
    * Update the enemy - call each frame
    */
   update(params: EnemyUpdateParams): void {
@@ -345,6 +460,12 @@ export class Enemy {
     if (this.state === 'idle' && hasLoS) {
       // Start pursuing as soon as the enemy gains line-of-sight.
       this.state = 'pursuing'
+      // Reset rusher state when starting to pursue (for enemy2)
+      if (this.type === 2) {
+        this.rusherState = 'approaching'
+        this.rusherStateTimer = 0
+        this.hitPlayerThisRush = false
+      }
     } else if (this.state === 'pursuing' && distance > 25.0 && !hasLoS) {
       // Stop pursuing when the player is too far and out of sight.
       this.state = 'idle'
@@ -386,41 +507,46 @@ export class Enemy {
         this.pursuitAnimTime += dt
       }
 
-      // Enemy0 keeps a bit more distance from the player.
-      const desiredDistance = this.type === 0 ? 6.0 : this.type === 1 ? this.tankPreferredDistance : 1.5
-      const buffer = this.type === 0 ? 0.5 : this.type === 1 ? this.tankPreferredWindow : 0
-      const canBackOff = this.type === 0 || this.type === 1
-
-      if (this.type === 0 && this.orbCharging) {
-        // Stand still during charge.
-        this.velocity.x = 0
-        this.velocity.z = 0
-      } else if (distance > desiredDistance + buffer) {
-        // Approach
-        if (distance > 1e-6) this.toPlayer.multiplyScalar(1 / distance)
-
-        if (this.grounded) {
-          this.velocity.x = this.toPlayer.x * this.moveSpeed
-          this.velocity.z = this.toPlayer.z * this.moveSpeed
-        } else {
-          this.velocity.x += this.toPlayer.x * this.moveSpeed * 0.1 * dt
-          this.velocity.z += this.toPlayer.z * this.moveSpeed * 0.1 * dt
-        }
-      } else if (canBackOff && distance > 0.5 && distance < desiredDistance - buffer) {
-        // Too close: back off a bit.
-        if (distance > 1e-6) this.toPlayer.multiplyScalar(1 / distance)
-        if (this.grounded) {
-          this.velocity.x = -this.toPlayer.x * this.moveSpeed
-          this.velocity.z = -this.toPlayer.z * this.moveSpeed
-        } else {
-          this.velocity.x += -this.toPlayer.x * this.moveSpeed * 0.1 * dt
-          this.velocity.z += -this.toPlayer.z * this.moveSpeed * 0.1 * dt
-        }
+      // Enemy2 (rusher) special behavior
+      if (this.type === 2) {
+        this.updateRusherBehavior(dt, pos, playerPosition, collisionMeshes)
       } else {
-        // In the sweet spot: stop.
-        if (this.grounded) {
+        // Enemy0 keeps a bit more distance from the player.
+        const desiredDistance = this.type === 0 ? 6.0 : this.type === 1 ? this.tankPreferredDistance : 1.5
+        const buffer = this.type === 0 ? 0.5 : this.type === 1 ? this.tankPreferredWindow : 0
+        const canBackOff = this.type === 0 || this.type === 1
+
+        if (this.type === 0 && this.orbCharging) {
+          // Stand still during charge.
           this.velocity.x = 0
           this.velocity.z = 0
+        } else if (distance > desiredDistance + buffer) {
+          // Approach
+          if (distance > 1e-6) this.toPlayer.multiplyScalar(1 / distance)
+
+          if (this.grounded) {
+            this.velocity.x = this.toPlayer.x * this.moveSpeed
+            this.velocity.z = this.toPlayer.z * this.moveSpeed
+          } else {
+            this.velocity.x += this.toPlayer.x * this.moveSpeed * 0.1 * dt
+            this.velocity.z += this.toPlayer.z * this.moveSpeed * 0.1 * dt
+          }
+        } else if (canBackOff && distance > 0.5 && distance < desiredDistance - buffer) {
+          // Too close: back off a bit.
+          if (distance > 1e-6) this.toPlayer.multiplyScalar(1 / distance)
+          if (this.grounded) {
+            this.velocity.x = -this.toPlayer.x * this.moveSpeed
+            this.velocity.z = -this.toPlayer.z * this.moveSpeed
+          } else {
+            this.velocity.x += -this.toPlayer.x * this.moveSpeed * 0.1 * dt
+            this.velocity.z += -this.toPlayer.z * this.moveSpeed * 0.1 * dt
+          }
+        } else {
+          // In the sweet spot: stop.
+          if (this.grounded) {
+            this.velocity.x = 0
+            this.velocity.z = 0
+          }
         }
       }
     } else if (this.state === 'idle') {

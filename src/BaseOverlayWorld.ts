@@ -181,6 +181,16 @@ export class BaseOverlayWorld {
   setMask1Enabled(enabled: boolean): void {
     this.mask1Enabled = enabled
     this.plane1.visible = enabled
+    this.alphaMaskPlane1.visible = enabled
+  }
+
+  // Control visibility of individual alpha masks for stencil rendering
+  setMask0AlphaVisible(visible: boolean): void {
+    this.alphaMaskPlane.visible = visible
+  }
+
+  setMask1AlphaVisible(visible: boolean): void {
+    this.alphaMaskPlane1.visible = visible
   }
 
   update(dt: number, aimAssistActive = false): void {

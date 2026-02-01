@@ -35,8 +35,13 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const unmaskedEnemyScene = new THREE.Scene()
   unmaskedEnemyScene.fog = new THREE.Fog(0x0b1220, 20, 120)
 
+  // Type 1 enemies: only visible through mask0_alpha
   const maskedEnemyScene = new THREE.Scene()
   maskedEnemyScene.fog = new THREE.Fog(0x0b1220, 20, 120)
+
+  // Type 2 enemies: only visible through mask1_alpha
+  const maskedEnemyScene2 = new THREE.Scene()
+  maskedEnemyScene2.fog = new THREE.Fog(0x0b1220, 20, 120)
 
   const camera = new THREE.PerspectiveCamera(
     90, // Wider FOV for speed feel
@@ -200,10 +205,15 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       gameLoop.currentEnemies.push(enemy) // Track in GameLoop for special level logic
       
       // Add to appropriate scene based on type
+      // Type 0: always visible
+      // Type 1: only visible through mask0_alpha
+      // Type 2: only visible through mask1_alpha
       if (enemyConfig.type === 0) {
         unmaskedEnemyScene.add(enemy.mesh)
-      } else {
+      } else if (enemyConfig.type === 1) {
         maskedEnemyScene.add(enemy.mesh)
+      } else if (enemyConfig.type === 2) {
+        maskedEnemyScene2.add(enemy.mesh)
       }
     })
   }
@@ -224,8 +234,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       
       if (enemy.type === 0) {
         unmaskedEnemyScene.remove(enemy.mesh)
-      } else {
+      } else if (enemy.type === 1) {
         maskedEnemyScene.remove(enemy.mesh)
+      } else if (enemy.type === 2) {
+        maskedEnemyScene2.remove(enemy.mesh)
       }
 
       const fx = enemyChargeFxByEnemy.get(enemy)
@@ -1210,6 +1222,24 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
           }
         }
       }
+
+      // Enemy2 (rusher) collision with player kills player
+      if (!shouldPause && !playerIsDead && e.type === 2 && e.alive) {
+        const dx = e.mesh.position.x - player.position.x
+        const dz = e.mesh.position.z - player.position.z
+        const dy = e.mesh.position.y - player.position.y
+        const horizontalDistSq = dx * dx + dz * dz
+        const collisionRadius = playerRadius + e.hitRadius
+        
+        // Check horizontal collision and reasonable vertical overlap
+        if (horizontalDistSq <= collisionRadius * collisionRadius) {
+          const verticalDist = Math.abs(dy)
+          if (verticalDist <= currentHeight + e.halfHeight) {
+            // Enemy2 hit player - kill player
+            damagePlayer(playerHealth)
+          }
+        }
+      }
     }
     
     // Update tank attack meshes in masked enemy scene
@@ -1335,8 +1365,12 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
               spawnWorldItem1(e.mesh.position, e.halfHeight)
             }
 
-            // For now, non-type-0 enemies just disappear.
-            maskedEnemyScene.remove(e.mesh)
+            // Remove from appropriate scene based on type
+            if (e.type === 1) {
+              maskedEnemyScene.remove(e.mesh)
+            } else if (e.type === 2) {
+              maskedEnemyScene2.remove(e.mesh)
+            }
             e.dispose()
             enemies.splice(j, 1)
           }
@@ -1402,7 +1436,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     const overlayMs = performance.now() - overlayStart
 
     // === MULTI-PASS RENDERING WITH STENCIL MASKING ===
-    // Type 0 enemies are visible normally; type 1 enemies are only visible through the mask alpha.
+    // Type 0 enemies: always visible
+    // Type 1 enemies: only visible through mask0_alpha
+    // Type 2 enemies: only visible through mask1_alpha
     
     // Pass 1: Clear everything and render the world (map, environment)
     const renderWorldStart = performance.now()
@@ -1417,11 +1453,12 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     
     let renderMaskMs = 0
     let renderEnemiesMaskedMs = 0
+    let renderEnemiesMasked2Ms = 0
     let renderOverlayMs = 0
 
     if (baseOverlayWorld.isEnabled) {
-      // Pass 2: Render alpha mask to STENCIL BUFFER ONLY (eye holes)
-      // Configure stencil: write 1 where alpha mask is drawn
+      // ===== STENCIL PASS 1: Type 1 enemies through mask0_alpha =====
+      // Pass 2a: Render mask0_alpha to STENCIL BUFFER ONLY
       const renderMaskStart = performance.now()
       gl.enable(gl.STENCIL_TEST)
       gl.stencilFunc(gl.ALWAYS, 1, 0xff)
@@ -1429,21 +1466,50 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       gl.colorMask(false, false, false, false) // Don't write to color buffer
       gl.depthMask(false) // Don't write to depth buffer
 
+      // Only render mask0 alpha, hide mask1 alpha
+      baseOverlayWorld.setMask0AlphaVisible(true)
+      baseOverlayWorld.setMask1AlphaVisible(false)
       renderer.render(baseOverlayWorld.alphaMaskScene, baseOverlayWorld.alphaMaskCamera)
-      renderMaskMs = performance.now() - renderMaskStart
 
-      // Pass 3: Render masked enemies ONLY where stencil == 1 (eye holes)
-      const renderEnemiesMaskedStart = performance.now()
+      // Pass 3a: Render type 1 enemies ONLY where stencil == 1
       gl.stencilFunc(gl.EQUAL, 1, 0xff)
       gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP)
       gl.colorMask(true, true, true, true) // Write to color buffer
       gl.depthMask(true) // Write to depth buffer
 
       renderer.render(maskedEnemyScene, camera)
+      renderMaskMs = performance.now() - renderMaskStart
+
+      // ===== STENCIL PASS 2: Type 2 enemies through mask1_alpha =====
+      // Pass 2b: Clear stencil and render mask1_alpha
+      const renderMask2Start = performance.now()
+      gl.clear(gl.STENCIL_BUFFER_BIT) // Clear stencil buffer
+      gl.stencilFunc(gl.ALWAYS, 1, 0xff)
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE)
+      gl.colorMask(false, false, false, false) // Don't write to color buffer
+      gl.depthMask(false) // Don't write to depth buffer
+
+      // Only render mask1 alpha, hide mask0 alpha
+      baseOverlayWorld.setMask0AlphaVisible(false)
+      baseOverlayWorld.setMask1AlphaVisible(true)
+      renderer.render(baseOverlayWorld.alphaMaskScene, baseOverlayWorld.alphaMaskCamera)
+
+      // Pass 3b: Render type 2 enemies ONLY where stencil == 1
+      gl.stencilFunc(gl.EQUAL, 1, 0xff)
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP)
+      gl.colorMask(true, true, true, true) // Write to color buffer
+      gl.depthMask(true) // Write to depth buffer
+
+      renderer.render(maskedEnemyScene2, camera)
 
       // Disable stencil for the rest
       gl.disable(gl.STENCIL_TEST)
-      renderEnemiesMaskedMs = performance.now() - renderEnemiesMaskedStart
+      renderEnemiesMaskedMs = performance.now() - renderMaskStart
+      renderEnemiesMasked2Ms = performance.now() - renderMask2Start
+      
+      // Restore both alpha masks for next frame
+      baseOverlayWorld.setMask0AlphaVisible(true)
+      baseOverlayWorld.setMask1AlphaVisible(true)
     }
     
     // Pass 4: Render hand viewmodel (beneath mask overlay)
@@ -1460,7 +1526,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       renderOverlayMs = performance.now() - renderOverlayStart
     }
 
-    const renderMs = renderWorldMs + renderEnemiesUnmaskedMs + renderMaskMs + renderEnemiesMaskedMs + renderOverlayMs + renderHandMs
+    const renderMs = renderWorldMs + renderEnemiesUnmaskedMs + renderMaskMs + renderEnemiesMaskedMs + renderEnemiesMasked2Ms + renderOverlayMs + renderHandMs
     const frameMs = performance.now() - frameStart
     const physicsMs = (playerMs ?? 0) + enemyMs
 
@@ -1472,10 +1538,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     frameProfiler.add('overlay', overlayMs)
     frameProfiler.add('render', renderMs)
     frameProfiler.add('render.world', renderWorldMs)
-    frameProfiler.add('render.enemies', renderEnemiesUnmaskedMs + renderEnemiesMaskedMs)
+    frameProfiler.add('render.enemies', renderEnemiesUnmaskedMs + renderEnemiesMaskedMs + renderEnemiesMasked2Ms)
     frameProfiler.add('render.enemies.unmasked', renderEnemiesUnmaskedMs)
     frameProfiler.add('render.mask', renderMaskMs)
     frameProfiler.add('render.enemies.masked', renderEnemiesMaskedMs)
+    frameProfiler.add('render.enemies.masked2', renderEnemiesMasked2Ms)
     frameProfiler.add('render.overlay', renderOverlayMs)
     frameProfiler.add('render.hand', renderHandMs)
 
