@@ -18,7 +18,10 @@ export type ProjectileOptions = {
   drag?: number
   lifetimeSeconds?: number
   collisionRadius?: number
+  collisionEpsilon?: number
   collideWithWorld?: boolean
+  bounceRestitution?: number
+  maxBounces?: number
 }
 
 type ProjectileUpdateParams = {
@@ -57,6 +60,8 @@ export class Projectile {
   private readonly texture: THREE.CanvasTexture
   private readonly options: Required<ProjectileOptions>
 
+  private bounceCount = 0
+
   private sheet: SpriteSheet | null = null
   private spriteReady = false
   private lastDrawnFrame = -1
@@ -66,6 +71,8 @@ export class Projectile {
   private readonly rayOrigin = new THREE.Vector3()
   private readonly rayDir = new THREE.Vector3()
   private readonly hits: THREE.Intersection[] = []
+  private readonly hitNormal = new THREE.Vector3()
+  private readonly normalMatrix = new THREE.Matrix3()
 
   constructor(position: THREE.Vector3, velocity: THREE.Vector3, options: ProjectileOptions) {
     this.options = {
@@ -77,7 +84,10 @@ export class Projectile {
       drag: 0,
       lifetimeSeconds: 2.0,
       collisionRadius: 0.15,
+      collisionEpsilon: 0.002,
       collideWithWorld: true,
+      bounceRestitution: 0,
+      maxBounces: 0,
       ...options,
     }
 
@@ -126,44 +136,74 @@ export class Projectile {
       return
     }
 
-    // Physics
-    if (this.options.gravity !== 0) {
-      this.velocity.y -= this.options.gravity * dt
-    }
-    if (this.options.drag > 0) {
-      const decay = Math.exp(-this.options.drag * dt)
-      this.velocity.multiplyScalar(decay)
-    }
+    // Physics (integrate; collision assumes constant velocity during dt)
+    if (this.options.gravity !== 0) this.velocity.y -= this.options.gravity * dt
+    if (this.options.drag > 0) this.velocity.multiplyScalar(Math.exp(-this.options.drag * dt))
 
     const pos = this.mesh.position
-    const dx = this.velocity.x * dt
-    const dy = this.velocity.y * dt
-    const dz = this.velocity.z * dt
 
-    // Optional world collision (segment raycast)
-    if (this.options.collideWithWorld && collisionMeshes && collisionMeshes.length > 0) {
+    // World collision sweep + bounce (iterative so we don't tunnel or double-apply motion)
+    let remaining = dt
+    let iterations = 0
+    const maxIterations = 6
+
+    const canCollide = this.options.collideWithWorld && collisionMeshes && collisionMeshes.length > 0
+    while (remaining > 1e-6 && iterations++ < maxIterations) {
+      const dx = this.velocity.x * remaining
+      const dy = this.velocity.y * remaining
+      const dz = this.velocity.z * remaining
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
-      if (dist > 1e-6) {
-        this.rayOrigin.copy(pos)
-        this.rayDir.set(dx / dist, dy / dist, dz / dist)
-        this.raycaster.set(this.rayOrigin, this.rayDir)
-        this.raycaster.far = dist + this.options.collisionRadius
-        this.hits.length = 0
-        this.raycaster.intersectObjects(collisionMeshes, false, this.hits)
 
-        if (this.hits.length > 0) {
-          const hit = this.hits[0]
-          const stopDist = Math.max(0, hit.distance - this.options.collisionRadius)
-          pos.addScaledVector(this.rayDir, stopDist)
-          this.alive = false
-          return
-        }
+      if (!canCollide || dist <= 1e-6) {
+        pos.x += dx
+        pos.y += dy
+        pos.z += dz
+        break
       }
-    }
 
-    pos.x += dx
-    pos.y += dy
-    pos.z += dz
+      this.rayOrigin.copy(pos)
+      this.rayDir.set(dx / dist, dy / dist, dz / dist)
+      this.raycaster.set(this.rayOrigin, this.rayDir)
+      this.raycaster.far = dist + this.options.collisionRadius
+      this.hits.length = 0
+      this.raycaster.intersectObjects(collisionMeshes!, false, this.hits)
+
+      if (this.hits.length === 0) {
+        pos.x += dx
+        pos.y += dy
+        pos.z += dz
+        break
+      }
+
+      const hit = this.hits[0]
+      const travelDist = Math.max(0, hit.distance - this.options.collisionRadius)
+      pos.addScaledVector(this.rayDir, travelDist)
+
+      const tHit = dist > 0 ? (travelDist / dist) * remaining : 0
+      remaining = Math.max(0, remaining - tHit)
+
+      if (!(this.options.bounceRestitution > 0) || !this.tryGetWorldNormal(hit, this.hitNormal)) {
+        this.alive = false
+        return
+      }
+
+      // Nudge off the surface to avoid immediate re-hit.
+      pos.addScaledVector(this.hitNormal, this.options.collisionEpsilon)
+
+      // Reflect velocity around the hit normal.
+      const vn = this.velocity.dot(this.hitNormal)
+      if (vn < 0) this.velocity.addScaledVector(this.hitNormal, -2 * vn)
+      this.velocity.multiplyScalar(this.options.bounceRestitution)
+
+      this.bounceCount++
+      if (this.options.maxBounces > 0 && this.bounceCount > this.options.maxBounces) {
+        this.alive = false
+        return
+      }
+
+      // Ensure we make progress even on near-zero distance hits.
+      remaining = Math.max(0, remaining - 1e-5)
+    }
 
     // Billboard
     if (this.options.billboard !== 'none') {
@@ -207,6 +247,19 @@ export class Projectile {
     this.sheet.drawFrame(this.ctx, frame, 0, 0, 1)
     this.lastDrawnFrame = frame
     this.texture.needsUpdate = true
+  }
+
+  private tryGetWorldNormal(hit: THREE.Intersection, out: THREE.Vector3): boolean {
+    const faceNormal = hit.face?.normal
+    if (!faceNormal) return false
+
+    out.copy(faceNormal)
+    this.normalMatrix.getNormalMatrix(hit.object.matrixWorld)
+    out.applyMatrix3(this.normalMatrix).normalize()
+
+    // Ensure the normal opposes motion (handles backface hits).
+    if (out.dot(this.rayDir) > 0) out.negate()
+    return out.lengthSq() > 0
   }
 
   private renderPlaceholder(): void {

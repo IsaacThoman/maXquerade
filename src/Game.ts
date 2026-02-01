@@ -205,9 +205,11 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       alphaTest: 0.35,
       gravity: 0,
       drag: 0,
-      lifetimeSeconds: 2.0,
+      lifetimeSeconds: 20.0,
       collisionRadius: 0.16,
       collideWithWorld: true,
+      bounceRestitution: 0.9,
+      maxBounces: 10,
     })
 
     scene.add(p.mesh)
