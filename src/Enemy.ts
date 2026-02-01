@@ -193,19 +193,12 @@ export class Enemy {
     this.velocity.set(0, 0, 0)
     this.pursuitAnimTime = 0
 
-    if (this.type === 0) {
-      this.state = 'dying'
-      this.deathAnimTime = 0
-      this.hideOnNextUpdate = false
-      this.spawnExplosionEvent = false
-      this.lastDrawnFrame = -1
-      return
-    }
-
-    // Other enemy types: disappear for now.
-    this.state = 'dead'
-
-    this.mesh.visible = false
+    // All enemy types now play death animation
+    this.state = 'dying'
+    this.deathAnimTime = 0
+    this.hideOnNextUpdate = false
+    this.spawnExplosionEvent = false
+    this.lastDrawnFrame = -1
   }
 
   consumeExplosionEvent(): boolean {

@@ -180,7 +180,7 @@ export class BaseOverlayWorld {
 
   setMask1Enabled(enabled: boolean): void {
     this.mask1Enabled = enabled
-    this.updateVisibility()
+    this.plane1.visible = enabled
   }
 
   update(dt: number, aimAssistActive = false): void {
