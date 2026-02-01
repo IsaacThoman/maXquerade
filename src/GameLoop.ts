@@ -14,6 +14,8 @@ export interface LevelConfig {
   waitForPlayerMovement: boolean
 }
 
+export type FadeReason = 'level-advance' | 'player-death' | null
+
 export class GameLoop {
   currentLevel = 0
   phase: GamePhase = 'intro'
@@ -59,12 +61,15 @@ export class GameLoop {
   // Fade effects - slower for cinematic feel
   fadeAlpha = 0
   fadeSpeed = 0.4 // Slower fade (was 1.5)
+
+  fadeReason: FadeReason = null
   
   // Event callbacks
   onEnemyDefeated: (() => void) | null = null
   onMaskPickup: (() => void) | null = null
   onLevelComplete: (() => void) | null = null
   onFadeComplete: (() => void) | null = null
+  onRestartLevel: (() => void) | null = null
   onDoorOpen: (() => void) | null = null
   
   update(dt: number, playerPosition: THREE.Vector3): void {
@@ -113,10 +118,16 @@ export class GameLoop {
         // Call the completion callback ONCE at the start of black screen
         // Check if this is the first frame (phaseTimer will be < dt since it was just set to 0)
         if (this.phaseTimer < 0.1) {
-          console.log('BLACK SCREEN START - Opening door and setting up next level NOW')
+          const label = this.fadeReason === 'player-death' ? 'Restarting level' : 'Opening door and setting up next level'
+          console.log(`BLACK SCREEN START - ${label} NOW`)
           try {
-            this.onFadeComplete?.()
-            console.log('onFadeComplete executed successfully')
+            if (this.fadeReason === 'player-death') {
+              this.onRestartLevel?.()
+              console.log('onRestartLevel executed successfully')
+            } else {
+              this.onFadeComplete?.()
+              console.log('onFadeComplete executed successfully')
+            }
           } catch (e) {
             console.error('ERROR in onFadeComplete:', e)
           }
@@ -135,6 +146,7 @@ export class GameLoop {
           this.phase = 'intro'
           this.playerHasMoved = false
           this.enemyDefeated = false
+          this.fadeReason = null
         }
         break
     }
@@ -144,6 +156,7 @@ export class GameLoop {
     console.log('triggerMaskPickup called, current phase:', this.phase)
     if (this.phase === 'playing' || this.phase === 'enemy-defeated') {
       console.log('Phase is valid, setting to fade-out')
+      this.fadeReason = 'level-advance'
       this.phase = 'fade-out'
       this.phaseTimer = 0
       this.onMaskPickup?.()
@@ -151,6 +164,13 @@ export class GameLoop {
     } else {
       console.log('ERROR: Cannot trigger mask pickup from phase:', this.phase)
     }
+  }
+
+  triggerPlayerDeath(): void {
+    if (this.phase === 'fade-out' || this.phase === 'fade-in' || this.phase === 'restarting') return
+    this.fadeReason = 'player-death'
+    this.phase = 'fade-out'
+    this.phaseTimer = 0
   }
   
   startNextLevel(): void {

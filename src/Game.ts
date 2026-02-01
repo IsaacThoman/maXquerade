@@ -81,11 +81,32 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const player = controls.object
   scene.add(player)
 
+  // Initialize GameLoop for level progression
+  const gameLoop = new GameLoop()
+
   // Player config
   const playerHeight = 1.7
   const playerRadius = 0.35
   const slideHeight = 0.9 // Crouched/sliding height
   player.position.set(0, playerHeight, 0)
+
+  // Player health (placeholder system)
+  const playerMaxHealth = 1
+  let playerHealth = playerMaxHealth
+  let playerIsDead = false
+  const killPlayer = (): void => {
+    if (playerIsDead) return
+    playerIsDead = true
+    playerHealth = 0
+    // Fade-restart (no full refresh)
+    gameLoop.triggerPlayerDeath()
+  }
+
+  const damagePlayer = (amount: number): void => {
+    if (playerIsDead) return
+    playerHealth = Math.max(0, playerHealth - amount)
+    if (playerHealth <= 0) killPlayer()
+  }
 
   // Collision meshes from the map
   const collisionMeshes: THREE.Mesh[] = []
@@ -111,9 +132,6 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   sun.shadow.camera.bottom = -80
   scene.add(sun)
 
-  // Initialize GameLoop for level progression
-  const gameLoop = new GameLoop()
-  
   // Enemy management - now supports multiple enemies per level
   let currentEnemies: Enemy[] = []
   
@@ -123,7 +141,9 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const enemies: Enemy[] = []
 
   const projectiles: Projectile[] = []
+  const enemyProjectiles: Projectile[] = []
   const effects: Projectile[] = []
+  const enemyChargeFxByEnemy = new Map<Enemy, Projectile>()
   type WorldItem = { id: number; gi: GroundItem }
   const groundItems: WorldItem[] = []
 
@@ -139,6 +159,14 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   
   // Level management functions
   const spawnLevelEnemy = (): void => {
+    // Clear any lingering enemy projectiles / charge FX
+    for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+      const p = enemyProjectiles[i]
+      scene.remove(p.mesh)
+      p.dispose()
+      enemyProjectiles.splice(i, 1)
+    }
+
     // Clear existing enemies
     currentEnemies.forEach(enemy => {
       const index = enemies.indexOf(enemy)
@@ -148,6 +176,13 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         unmaskedEnemyScene.remove(enemy.mesh)
       } else {
         maskedEnemyScene.remove(enemy.mesh)
+      }
+
+      const fx = enemyChargeFxByEnemy.get(enemy)
+      if (fx) {
+        scene.remove(fx.mesh)
+        fx.dispose()
+        enemyChargeFxByEnemy.delete(enemy)
       }
       
       enemy.dispose()
@@ -174,6 +209,14 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   }
   
   const clearLevel = (): void => {
+    // Clear any lingering enemy projectiles / charge FX
+    for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+      const p = enemyProjectiles[i]
+      scene.remove(p.mesh)
+      p.dispose()
+      enemyProjectiles.splice(i, 1)
+    }
+
     // Remove all current enemies
     currentEnemies.forEach(enemy => {
       const index = enemies.indexOf(enemy)
@@ -183,6 +226,13 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         unmaskedEnemyScene.remove(enemy.mesh)
       } else {
         maskedEnemyScene.remove(enemy.mesh)
+      }
+
+      const fx = enemyChargeFxByEnemy.get(enemy)
+      if (fx) {
+        scene.remove(fx.mesh)
+        fx.dispose()
+        enemyChargeFxByEnemy.delete(enemy)
       }
       
       enemy.dispose()
@@ -540,6 +590,90 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
     scene.add(p.mesh)
     projectiles.push(p)
+  }
+
+  const enemyOrbMuzzlePos = new THREE.Vector3()
+  const enemyOrbDirFlat = new THREE.Vector3()
+  const enemyOrbVel = new THREE.Vector3()
+  const computeEnemyOrbMuzzle = (enemy: Enemy, targetPos: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 => {
+    const pos = enemy.mesh.position
+    enemyOrbDirFlat.set(targetPos.x - pos.x, 0, targetPos.z - pos.z)
+    if (enemyOrbDirFlat.lengthSq() < 1e-6) enemyOrbDirFlat.set(0, 0, -1)
+    else enemyOrbDirFlat.normalize()
+
+    out.copy(pos)
+    out.addScaledVector(enemyOrbDirFlat, 1.1)
+    out.y = pos.y - enemy.halfHeight + 1.4
+    return out
+  }
+
+  const clearEnemyChargeFx = (enemy: Enemy): void => {
+    const fx = enemyChargeFxByEnemy.get(enemy)
+    if (!fx) return
+    scene.remove(fx.mesh)
+    fx.dispose()
+    enemyChargeFxByEnemy.delete(enemy)
+  }
+
+  const spawnEnemyChargeFx = (enemy: Enemy): void => {
+    clearEnemyChargeFx(enemy)
+    computeEnemyOrbMuzzle(enemy, player.position, enemyOrbMuzzlePos)
+    const fx = new Projectile(enemyOrbMuzzlePos.clone(), new THREE.Vector3(0, 0, 0), {
+      spriteSrc: '/sprites/enemyProjectile.png',
+      frameWidth: 16,
+      frameHeight: 16,
+      frameCount: 4,
+      framesPerRow: 4,
+      fps: 12,
+      size: 1.25,
+      billboard: 'full',
+      alphaTest: 0.15,
+      gravity: 0,
+      drag: 0,
+      lifetimeSeconds: 999,
+      collisionRadius: 0,
+      collideWithWorld: false,
+      drawScaleStart: 0.15,
+      drawScaleTarget: 1.0,
+      drawScaleDuration: 3.0,
+    })
+
+    scene.add(fx.mesh)
+    enemyChargeFxByEnemy.set(enemy, fx)
+  }
+
+  const spawnEnemyOrbProjectile = (enemy: Enemy, direction: THREE.Vector3): void => {
+    computeEnemyOrbMuzzle(enemy, player.position, enemyOrbMuzzlePos)
+
+    enemyOrbVel.copy(direction)
+    if (enemyOrbVel.lengthSq() < 1e-6) enemyOrbVel.set(0, 0, -1)
+    else enemyOrbVel.normalize()
+    enemyOrbVel.multiplyScalar(16)
+
+    const p = new Projectile(enemyOrbMuzzlePos.clone(), enemyOrbVel.clone(), {
+      spriteSrc: '/sprites/enemyProjectile.png',
+      frameWidth: 16,
+      frameHeight: 16,
+      frameCount: 4,
+      framesPerRow: 4,
+      fps: 12,
+      size: 1.0,
+      billboard: 'full',
+      alphaTest: 0.15,
+      gravity: 0,
+      drag: 0,
+      lifetimeSeconds: 12.0,
+      collisionRadius: 0.28,
+      collideWithWorld: true,
+      bounceRestitution: 0,
+      maxBounces: 0,
+      startSize: 1.25,
+      targetSize: 1.25,
+      sizeTransitionDuration: 0.1,
+    })
+
+    scene.add(p.mesh)
+    enemyProjectiles.push(p)
   }
 
   // Raycasters for collision
@@ -1037,7 +1171,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     fadeOverlay.style.opacity = gameLoop.fadeAlpha.toString()
     
     // Show/hide mask collection animation
-    if (gameLoop.phase === 'restarting') {
+    if (gameLoop.phase === 'restarting' && gameLoop.fadeReason === 'level-advance') {
       // Level 2 shows "Second Mask Acquired" animation
       if (gameLoop.currentLevel === 1) {
         secondMaskAnimation.style.display = 'flex'
@@ -1071,6 +1205,28 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
         // Normal logic: type 0 enemies drop masks
         if (e.type === 0) {
           spawnWorldItem0(e.mesh.position, e.halfHeight)
+        }
+      }
+
+      // Enemy0 orb attack visuals + projectile spawn
+      if (e.consumeOrbChargeStartedEvent()) {
+        spawnEnemyChargeFx(e)
+      }
+
+      const shotDir = e.consumeOrbShotDirection()
+      if (shotDir) {
+        clearEnemyChargeFx(e)
+        spawnEnemyOrbProjectile(e, shotDir)
+      }
+
+      const chargeFx = enemyChargeFxByEnemy.get(e)
+      if (chargeFx) {
+        computeEnemyOrbMuzzle(e, player.position, enemyOrbMuzzlePos)
+        chargeFx.mesh.position.copy(enemyOrbMuzzlePos)
+        chargeFx.update({ dt, camera })
+
+        if (!chargeFx.alive || !e.alive || !e.isOrbCharging) {
+          clearEnemyChargeFx(e)
         }
       }
     }
@@ -1215,6 +1371,36 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       }
     }
 
+    for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+      const p = enemyProjectiles[i]
+      p.update({ dt, camera, collisionMeshes })
+
+      // Projectile vs player collision
+      if (p.alive && !playerIsDead) {
+        const px = p.mesh.position.x
+        const py = p.mesh.position.y
+        const pz = p.mesh.position.z
+
+        const dx = px - player.position.x
+        const dz = pz - player.position.z
+        const r = playerRadius + p.collisionRadius
+        if (dx * dx + dz * dz <= r * r) {
+          const dy = Math.abs(py - player.position.y)
+          if (dy <= currentHeight + p.collisionRadius) {
+            p.alive = false
+            // For now: any hit drains all health and resets.
+            damagePlayer(playerHealth)
+          }
+        }
+      }
+
+      if (!p.alive) {
+        scene.remove(p.mesh)
+        p.dispose()
+        enemyProjectiles.splice(i, 1)
+      }
+    }
+
     for (let i = effects.length - 1; i >= 0; i--) {
       const fx = effects[i]
       fx.update({ dt, camera })
@@ -1350,6 +1536,31 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     console.log('=== LEVEL TRANSITION COMPLETE ===')
     console.log('Current level:', gameLoop.currentLevel)
   }
+
+  gameLoop.onRestartLevel = () => {
+    // Clear projectiles/effects and respawn enemies for current level.
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i]
+      scene.remove(p.mesh)
+      p.dispose()
+      projectiles.splice(i, 1)
+    }
+
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const fx = effects[i]
+      scene.remove(fx.mesh)
+      fx.dispose()
+      effects.splice(i, 1)
+    }
+
+    // Enemy projectiles / charge FX are cleared by clearLevel/spawnLevelEnemy.
+    clearLevel()
+    resetPlayer()
+    spawnLevelEnemy()
+
+    playerHealth = playerMaxHealth
+    playerIsDead = false
+  }
   
   // Spawn first level
   spawnLevelEnemy()
@@ -1383,6 +1594,18 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
       scene.remove(p.mesh)
       p.dispose()
     }
+
+    for (const p of enemyProjectiles) {
+      scene.remove(p.mesh)
+      p.dispose()
+    }
+
+    for (const fx of enemyChargeFxByEnemy.values()) {
+      scene.remove(fx.mesh)
+      fx.dispose()
+    }
+    enemyChargeFxByEnemy.clear()
+
     for (const fx of effects) {
       scene.remove(fx.mesh)
       fx.dispose()
