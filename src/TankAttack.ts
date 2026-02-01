@@ -15,6 +15,8 @@ export class TankAttack {
   ageSeconds = 0
   buildDuration = 1 // Build much faster
   particleSize = 0.5 // Bigger particles for visibility
+
+  private hasDamagedPlayer = false
   
   private sheet: SpriteSheet | null = null
   private spriteReady = false
@@ -23,6 +25,8 @@ export class TankAttack {
   private targetPos = new THREE.Vector3() // Made mutable for wall collision
   private readonly direction = new THREE.Vector3()
   private readonly cameraPos = new THREE.Vector3()
+  private readonly tmp = new THREE.Vector3()
+  private readonly tmp2 = new THREE.Vector3()
   private actualDistance = 0 // Distance to wall or original target
   private collisionMeshes: THREE.Mesh[] = []
   private readonly raycaster = new THREE.Raycaster()
@@ -122,6 +126,27 @@ export class TankAttack {
       }
     }
   }
+
+  tryHitPlayer(playerPos: THREE.Vector3, playerRadius: number, playerPadding = 0.1): boolean {
+    if (!this.alive || this.hasDamagedPlayer) return false
+
+    const denom = Math.max(this.buildDuration, 1e-6)
+    const progress = THREE.MathUtils.clamp(this.ageSeconds / denom, 0, 1)
+    const currentLength = this.actualDistance * progress
+
+    this.tmp.subVectors(playerPos, this.startPos)
+    const t = this.tmp.dot(this.direction)
+    if (t < 0 || t > currentLength) return false
+
+    this.tmp2.copy(this.startPos).addScaledVector(this.direction, t)
+    const hitR = Math.max(0, playerRadius + playerPadding)
+    if (this.tmp2.distanceToSquared(playerPos) <= hitR * hitR) {
+      this.hasDamagedPlayer = true
+      return true
+    }
+
+    return false
+  }
   
   dispose(): void {
     for (const mesh of this.meshes) {
@@ -134,7 +159,7 @@ export class TankAttack {
   
   private async loadSpriteSheet(): Promise<void> {
     try {
-      const img = await this.loadImage('/sprites/tankattack.png')
+      const img = await this.loadImage('/sprites/TankAttackParticles.png')
       this.sheet = new SpriteSheet(img, 16, 16, {
         frameCount: 4,
         framesPerRow: 4,

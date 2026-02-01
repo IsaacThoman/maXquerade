@@ -1200,6 +1200,16 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
           clearEnemyChargeFx(e)
         }
       }
+
+      // Enemy1 laser damage (hitscan along the built beam)
+      if (!shouldPause && !playerIsDead && e.type === 1) {
+        for (const attack of e.attacks) {
+          if (attack.tryHitPlayer(player.position, playerRadius, 0.1)) {
+            damagePlayer(playerHealth)
+            break
+          }
+        }
+      }
     }
     
     // Update tank attack meshes in masked enemy scene
