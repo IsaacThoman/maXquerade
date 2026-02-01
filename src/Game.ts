@@ -423,7 +423,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
     const gi = new GroundItem(dropPos, {
       ...worldItems,
-      frameIndex: 2,
+      frameIndex: 3,
       size: 1.1,
       bobAmplitude: 0.22,
       bobFrequencyHz: 0.5,
