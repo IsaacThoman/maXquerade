@@ -30,7 +30,7 @@ export class Enemy {
   private lastOrbAttackTime = -999
   private readonly orbChargeDurationSeconds = 3.0
   private readonly orbCooldownSeconds = 6.0
-  private readonly orbPreferredDistance = 4.0
+  private readonly orbPreferredDistance = 6.0
   private readonly orbPreferredWindow = 1.0
 
   // Enemy1 (tank) preferred standoff distance for attacking
@@ -399,7 +399,7 @@ export class Enemy {
       }
 
       // Enemy0 keeps a bit more distance from the player.
-      const desiredDistance = this.type === 0 ? 4.0 : this.type === 1 ? this.tankPreferredDistance : 1.5
+      const desiredDistance = this.type === 0 ? 6.0 : this.type === 1 ? this.tankPreferredDistance : 1.5
       const buffer = this.type === 0 ? 0.5 : this.type === 1 ? this.tankPreferredWindow : 0
       const canBackOff = this.type === 0 || this.type === 1
 
