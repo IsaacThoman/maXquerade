@@ -51,7 +51,8 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   const inventory = new Inventory()
   const item0Id = 0 as const
   const item1Id = 1 as const
-  baseOverlayWorld.setEnabled(inventory.has(item0Id))
+  baseOverlayWorld.setMask0Enabled(inventory.has(item0Id))
+  baseOverlayWorld.setMask1Enabled(inventory.has(item1Id))
 
   const handViewModel = new HandViewModel({
     aspect: Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight),
@@ -787,7 +788,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
       inventory.add(wi.id)
       if (wi.id === item0Id) {
-        baseOverlayWorld.setEnabled(true)
+        baseOverlayWorld.setMask0Enabled(true)
+      }
+      if (wi.id === item1Id) {
+        baseOverlayWorld.setMask1Enabled(true)
       }
 
       scene.remove(wi.gi.mesh)
