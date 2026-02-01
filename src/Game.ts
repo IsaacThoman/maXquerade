@@ -51,6 +51,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
     throwFps: 12,
   })
 
+  const handIdleFpsMoving = 6
+  const handIdleFpsStill = 1
+  const handMoveSpeedThreshold = 0.15
+
   const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true })
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
   renderer.setSize(window.innerWidth, window.innerHeight)
@@ -101,7 +105,7 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
   // Type 0: always visible
   // Type 1: only visible through mask alpha
   const enemies: Enemy[] = [
-    new Enemy(new THREE.Vector3(-5.42, 5.0, -5.07), 'idle', 0),
+    new Enemy(new THREE.Vector3(0, 5.0, -20), 'idle', 0),
     new Enemy(new THREE.Vector3(-7.15, 5.0, -6.25), 'idle', 1),
   ]
 
@@ -681,6 +685,10 @@ export function startWalkingSim(root: HTMLElement): Cleanup {
 
     const overlayStart = performance.now()
     baseOverlayWorld.update(dt, !isOverlayRotateHeld())
+
+    const handHorizontalSpeed = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
+    const handIsMoving = controls.isLocked && handHorizontalSpeed > handMoveSpeedThreshold
+    handViewModel.idleFps = handIsMoving ? handIdleFpsMoving : handIdleFpsStill
     handViewModel.update(dt)
     const overlayMs = performance.now() - overlayStart
 

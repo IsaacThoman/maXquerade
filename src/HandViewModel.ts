@@ -27,8 +27,9 @@ export class HandViewModel {
   private sheet: SpriteSheet | null = null
 
   private state: AnimState = 'idle'
-  private idleTimer = 0
-  private throwTimer = 0
+  // Track animation progress in "frames" so changing fps mid-stream doesn't jump phase.
+  private idleFrameTime = 0
+  private throwFrameTime = 0
   private frame = 0
 
   private disposed = false
@@ -74,7 +75,7 @@ export class HandViewModel {
 
   triggerThrow(): void {
     this.state = 'throw'
-    this.throwTimer = 0
+    this.throwFrameTime = 0
   }
 
   update(dt: number): void {
@@ -107,19 +108,19 @@ export class HandViewModel {
   private computeFrame(dt: number): number {
     if (this.state === 'throw') {
       if (this.throwFps <= 0) return this.throwFrames[0]
-      this.throwTimer += dt
-      const idx = Math.floor(this.throwTimer * this.throwFps)
+      this.throwFrameTime += dt * this.throwFps
+      const idx = Math.floor(this.throwFrameTime)
       if (idx >= this.throwFrames.length) {
         this.state = 'idle'
-        this.idleTimer = 0
+        this.idleFrameTime = 0
         return this.idleFrames[0]
       }
       return this.throwFrames[Math.max(0, idx)]
     }
 
     if (this.idleFps <= 0) return this.idleFrames[0]
-    this.idleTimer += dt
-    const idx = Math.floor(this.idleTimer * this.idleFps) % this.idleFrames.length
+    this.idleFrameTime += dt * this.idleFps
+    const idx = Math.floor(this.idleFrameTime) % this.idleFrames.length
     return this.idleFrames[idx]
   }
 
